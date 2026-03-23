@@ -1,22 +1,29 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 from registry.tool_registry import register_tool
+
+from tools.metric_definitions import (
+    CANONICAL_CAMPAIGN_FIELDS,
+    SEMANTICS_MEMORY_TWO_WINDOWS_OF_SNAPSHOTS,
+    SOURCE_COMPUTED_FROM_RAW,
+    SOURCE_CSV_SUPPLIED,
+    SOURCE_LEGACY_OR_UNKNOWN,
+    SOURCE_MEMORY_SNAPSHOT_DERIVED,
+    SOURCE_METRICS_DEFAULT_TARGET_CPA,
+    SOURCE_METRICS_PERCENT_RESCALED,
+    SOURCE_MISSING,
+    get_field_provenance,
+    get_or_create_provenance,
+    set_field_provenance,
+)
 
 if TYPE_CHECKING:
     from agent.memory import MemoryStore
 
 
-CANONICAL_FIELDS = [
-    "campaign_id",
-    "CPA",
-    "ROAS",
-    "target_CPA",
-    "CPA_trend_7d",
-    "ROAS_trend_7d",
-    "days_active",
-]
+CANONICAL_FIELDS = CANONICAL_CAMPAIGN_FIELDS
 
 
 @dataclass
@@ -68,6 +75,9 @@ def validate_and_enrich_row(
     warnings: List[str] = []
     errors: List[str] = []
 
+    # Ensure provenance container exists (rows from tests or ad-hoc dicts may omit it).
+    get_or_create_provenance(row)
+
     # Ensure canonical keys exist
     for k in CANONICAL_FIELDS:
         if k not in row:
@@ -95,6 +105,13 @@ def validate_and_enrich_row(
     if row.get("target_CPA") is None and cfg.default_target_cpa is not None:
         row["target_CPA"] = cfg.default_target_cpa
         warnings.append(f"target_CPA missing; using default_target_cpa={cfg.default_target_cpa}")
+        set_field_provenance(
+            row,
+            "target_CPA",
+            SOURCE_METRICS_DEFAULT_TARGET_CPA,
+            detail=f"MetricsConfig.default_target_cpa={cfg.default_target_cpa}",
+            semantics="",
+        )
 
     # CPA / ROAS may be missing — compute if possible
     if cfg.allow_compute_from_raw:
@@ -119,9 +136,17 @@ def validate_and_enrich_row(
         if row["target_CPA"] is not None and row["target_CPA"] <= 0:
             warnings.append("target_CPA <= 0; would cause invalid CPA comparison/division.")
 
-    # Trends: ensure they are FRACTIONS (0.12 means 12%)
-    row["CPA_trend_7d"] = _normalize_trend_fraction(row.get("CPA_trend_7d"), "CPA_trend_7d", warnings)
-    row["ROAS_trend_7d"] = _normalize_trend_fraction(row.get("ROAS_trend_7d"), "ROAS_trend_7d", warnings)
+    # Trends: ensure they are FRACTIONS (0.12 means 12%); track percent-rescale provenance.
+    cpa_trend, cpa_rescaled = _normalize_trend_fraction(
+        row.get("CPA_trend_7d"), "CPA_trend_7d", warnings
+    )
+    roas_trend, roas_rescaled = _normalize_trend_fraction(
+        row.get("ROAS_trend_7d"), "ROAS_trend_7d", warnings
+    )
+    row["CPA_trend_7d"] = cpa_trend
+    row["ROAS_trend_7d"] = roas_trend
+    _apply_trend_provenance_after_normalize(row, "CPA_trend_7d", cpa_trend, cpa_rescaled)
+    _apply_trend_provenance_after_normalize(row, "ROAS_trend_7d", roas_trend, roas_rescaled)
 
     # If trends are missing, compute from memory if allowed and available
     if cfg.allow_compute_trends_from_memory and memory is not None:
@@ -148,29 +173,83 @@ def _to_float(value: Any, field: str, warnings: List[str]) -> Optional[float]:
         return None
 
 
-def _normalize_trend_fraction(value: Any, field: str, warnings: List[str]) -> Optional[float]:
+def _normalize_trend_fraction(
+    value: Any, field: str, warnings: List[str]
+) -> Tuple[Optional[float], bool]:
     """
     Ensures trend is a fraction:
       0.12 = 12%
      -0.05 = -5%
 
     If we detect a likely percent value like 12 or -5, we convert to 0.12 / -0.05.
+
+    Returns (value, was_rescaled) where was_rescaled True if the >1.5 heuristic fired.
     """
     if value is None:
-        return None
+        return None, False
 
     try:
         v = float(value)
     except Exception:
         warnings.append(f"Could not parse {field} as float: {value!r}")
-        return None
+        return None, False
 
     # Heuristic: if abs(v) > 1.5, it's likely a percent like 12 (meaning 12%)
     if abs(v) > 1.5 and abs(v) <= 100:
         warnings.append(f"{field} looked like percent ({v}); converting to fraction ({v/100.0}).")
         v = v / 100.0
+        return v, True
 
-    return v
+    return v, False
+
+
+def _apply_trend_provenance_after_normalize(
+    row: Dict[str, Any],
+    field_name: str,
+    value: Optional[float],
+    was_rescaled: bool,
+) -> None:
+    """Update trend provenance after metrics normalization (without clobbering CSV truth when unchanged)."""
+    prev_semantics = ""
+    prev_dict = get_field_provenance(row, field_name)
+    if prev_dict:
+        prev_semantics = str(prev_dict.get("semantics") or "")
+
+    if was_rescaled:
+        set_field_provenance(
+            row,
+            field_name,
+            SOURCE_METRICS_PERCENT_RESCALED,
+            detail="Bare numeric treated as whole-percent and divided by 100",
+            semantics=prev_semantics,
+        )
+        return
+
+    if value is None:
+        prev = get_field_provenance(row, field_name)
+        if prev is None or prev.get("source") != SOURCE_MISSING:
+            set_field_provenance(
+                row,
+                field_name,
+                SOURCE_MISSING,
+                detail="No valid trend value after metrics normalization",
+                semantics="",
+            )
+        return
+
+    prev = get_field_provenance(row, field_name)
+    if prev is None:
+        set_field_provenance(
+            row,
+            field_name,
+            SOURCE_LEGACY_OR_UNKNOWN,
+            detail="Value present but row had no loader provenance for this field",
+            semantics="Interpretation of window (e.g. 7d) not verified",
+        )
+        return
+
+    if prev.get("source") == SOURCE_CSV_SUPPLIED:
+        return
 
 
 def _get_raw_number(raw: Dict[str, Any], aliases: List[str]) -> Optional[float]:
@@ -205,6 +284,13 @@ def _maybe_compute_cpa_roas_from_raw(row: Dict[str, Any], warnings: List[str]) -
         if conv > 0:
             row["CPA"] = spend / conv
             warnings.append("Computed CPA from raw spend/conversions.")
+            set_field_provenance(
+                row,
+                "CPA",
+                SOURCE_COMPUTED_FROM_RAW,
+                detail="CPA = spend / conversions from _raw columns",
+                semantics="",
+            )
         else:
             warnings.append("Could not compute CPA: conversions <= 0.")
 
@@ -212,6 +298,13 @@ def _maybe_compute_cpa_roas_from_raw(row: Dict[str, Any], warnings: List[str]) -
         if spend > 0:
             row["ROAS"] = rev / spend
             warnings.append("Computed ROAS from raw revenue/spend.")
+            set_field_provenance(
+                row,
+                "ROAS",
+                SOURCE_COMPUTED_FROM_RAW,
+                detail="ROAS = revenue / spend from _raw columns",
+                semantics="",
+            )
         else:
             warnings.append("Could not compute ROAS: spend <= 0.")
 
@@ -270,6 +363,16 @@ def _maybe_fill_trends_from_memory(
         if prev_mean and prev_mean != 0 and last_mean is not None:
             row["CPA_trend_7d"] = (last_mean - prev_mean) / prev_mean
             warnings.append("Computed CPA_trend_7d from memory.")
+            set_field_provenance(
+                row,
+                "CPA_trend_7d",
+                SOURCE_MEMORY_SNAPSHOT_DERIVED,
+                detail=(
+                    f"Mean CPA change across last two windows of {window} snapshots each "
+                    f"(not calendar 7-day)"
+                ),
+                semantics=SEMANTICS_MEMORY_TWO_WINDOWS_OF_SNAPSHOTS,
+            )
         else:
             warnings.append("Could not compute CPA_trend_7d from memory (missing/zero baselines).")
 
@@ -279,5 +382,15 @@ def _maybe_fill_trends_from_memory(
         if prev_mean and prev_mean != 0 and last_mean is not None:
             row["ROAS_trend_7d"] = (last_mean - prev_mean) / prev_mean
             warnings.append("Computed ROAS_trend_7d from memory.")
+            set_field_provenance(
+                row,
+                "ROAS_trend_7d",
+                SOURCE_MEMORY_SNAPSHOT_DERIVED,
+                detail=(
+                    f"Mean ROAS change across last two windows of {window} snapshots each "
+                    f"(not calendar 7-day)"
+                ),
+                semantics=SEMANTICS_MEMORY_TWO_WINDOWS_OF_SNAPSHOTS,
+            )
         else:
             warnings.append("Could not compute ROAS_trend_7d from memory (missing/zero baselines).")

@@ -6,17 +6,17 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from registry.tool_registry import register_tool
 
+from tools.metric_definitions import (
+    CANONICAL_CAMPAIGN_FIELDS,
+    SEMANTICS_CSV_TREND_UNKNOWN_WINDOW,
+    SOURCE_CSV_SUPPLIED,
+    SOURCE_MISSING,
+    set_field_provenance,
+)
 
-# Canonical fields your agent/goals expect
-CANONICAL_FIELDS = [
-    "campaign_id",
-    "CPA",
-    "ROAS",
-    "target_CPA",
-    "CPA_trend_7d",
-    "ROAS_trend_7d",
-    "days_active",
-]
+
+# Canonical fields your agent/goals expect (single source: metric_definitions)
+CANONICAL_FIELDS = CANONICAL_CAMPAIGN_FIELDS
 
 
 # Aliases to handle messy business CSV column names
@@ -144,17 +144,138 @@ def _normalize_row(
     out["target_CPA"] = _coerce_float(get("target_CPA"), warn=warnings, row=row_number, field="target_CPA")
 
     # Trends: accept "12%", "+12%", "-0.12", "0.12" -> store as fraction (0.12)
-    out["CPA_trend_7d"] = _coerce_fraction(get("CPA_trend_7d"), warn=warnings, row=row_number, field="CPA_trend_7d")
-    out["ROAS_trend_7d"] = _coerce_fraction(get("ROAS_trend_7d"), warn=warnings, row=row_number, field="ROAS_trend_7d")
+    cpa_trend_raw = get("CPA_trend_7d")
+    roas_trend_raw = get("ROAS_trend_7d")
+    out["CPA_trend_7d"], cpa_trend_kind = _coerce_fraction(
+        cpa_trend_raw, warn=warnings, row=row_number, field="CPA_trend_7d", col_resolved=col_lookup.get("CPA_trend_7d")
+    )
+    out["ROAS_trend_7d"], roas_trend_kind = _coerce_fraction(
+        roas_trend_raw, warn=warnings, row=row_number, field="ROAS_trend_7d", col_resolved=col_lookup.get("ROAS_trend_7d")
+    )
+    _attach_trend_provenance_loader(
+        out, "CPA_trend_7d", out["CPA_trend_7d"], cpa_trend_kind, col_lookup.get("CPA_trend_7d")
+    )
+    _attach_trend_provenance_loader(
+        out, "ROAS_trend_7d", out["ROAS_trend_7d"], roas_trend_kind, col_lookup.get("ROAS_trend_7d")
+    )
 
     # days_active (int)
     out["days_active"] = _coerce_int(get("days_active"), warn=warnings, row=row_number, field="days_active")
+
+    # Scalar metrics: provenance for trust layer (CSV vs missing)
+    _attach_scalar_provenance(
+        out,
+        "CPA",
+        out["CPA"],
+        col_lookup.get("CPA"),
+    )
+    _attach_scalar_provenance(
+        out,
+        "ROAS",
+        out["ROAS"],
+        col_lookup.get("ROAS"),
+    )
+    _attach_scalar_provenance(
+        out,
+        "target_CPA",
+        out["target_CPA"],
+        col_lookup.get("target_CPA"),
+    )
+    _attach_scalar_provenance(
+        out,
+        "days_active",
+        out["days_active"],
+        col_lookup.get("days_active"),
+    )
+    if out["campaign_id"]:
+        set_field_provenance(
+            out,
+            "campaign_id",
+            SOURCE_CSV_SUPPLIED,
+            detail="Present in CSV",
+            semantics="",
+        )
+    else:
+        set_field_provenance(out, "campaign_id", SOURCE_MISSING, detail="Missing or empty in CSV", semantics="")
 
     # Optional: keep extra raw columns for debugging
     # (won't be used by goals, but helps when CSV is messy)
     out["_raw"] = raw_row
 
     return out, warnings
+
+
+def _attach_scalar_provenance(
+    row: Dict[str, Any],
+    field_name: str,
+    value: Any,
+    csv_column: Optional[str],
+) -> None:
+    if csv_column is None:
+        set_field_provenance(
+            row,
+            field_name,
+            SOURCE_MISSING,
+            detail="No CSV column mapped for this field",
+            semantics="",
+        )
+        return
+    if value is None:
+        set_field_provenance(
+            row,
+            field_name,
+            SOURCE_MISSING,
+            detail="Empty or unparseable cell",
+            semantics="",
+        )
+        return
+    set_field_provenance(
+        row,
+        field_name,
+        SOURCE_CSV_SUPPLIED,
+        detail=f"From column {csv_column!r}",
+        semantics="",
+    )
+
+
+def _attach_trend_provenance_loader(
+    row: Dict[str, Any],
+    field_name: str,
+    value: Optional[float],
+    kind: Optional[str],
+    csv_column: Optional[str],
+) -> None:
+    """kind: 'percent_suffix' | 'bare_numeric' | None if missing/unparsed."""
+    if csv_column is None:
+        set_field_provenance(
+            row,
+            field_name,
+            SOURCE_MISSING,
+            detail="No CSV column mapped for this trend field",
+            semantics=SEMANTICS_CSV_TREND_UNKNOWN_WINDOW,
+        )
+        return
+    if value is None:
+        set_field_provenance(
+            row,
+            field_name,
+            SOURCE_MISSING,
+            detail="Empty, missing, or unparseable cell",
+            semantics=SEMANTICS_CSV_TREND_UNKNOWN_WINDOW,
+        )
+        return
+    detail = (
+        "Parsed with % suffix (interpreted as fraction)"
+        if kind == "percent_suffix"
+        else "Parsed as bare number (fraction; large values may be rescaled in metrics step)"
+    )
+    set_field_provenance(
+        row,
+        field_name,
+        SOURCE_CSV_SUPPLIED,
+        detail=detail,
+        semantics=SEMANTICS_CSV_TREND_UNKNOWN_WINDOW,
+    )
 
 
 def _coerce_float(value: Any, warn: List[str], row: int, field: str) -> Optional[float]:
@@ -193,7 +314,13 @@ def _coerce_int(value: Any, warn: List[str], row: int, field: str) -> Optional[i
         return None
 
 
-def _coerce_fraction(value: Any, warn: List[str], row: int, field: str) -> Optional[float]:
+def _coerce_fraction(
+    value: Any,
+    warn: List[str],
+    row: int,
+    field: str,
+    col_resolved: Optional[str] = None,
+) -> Tuple[Optional[float], Optional[str]]:
     """
     Accepts:
       "12%"  -> 0.12
@@ -201,23 +328,29 @@ def _coerce_fraction(value: Any, warn: List[str], row: int, field: str) -> Optio
       "-5%"  -> -0.05
       "0.12" -> 0.12
       "-0.05"-> -0.05
-      "12"   -> 12.0  (we treat as fraction only if it has % sign; otherwise it's ambiguous)
+      "12"   -> 12.0  (ambiguous vs percent; metrics may rescale)
+
+    Returns (value, kind) where kind is 'percent_suffix', 'bare_numeric', or None if missing.
+    If col_resolved is None, the column was not mapped — caller still gets (None, None).
     """
+    if col_resolved is None:
+        # Column not present in CSV header mapping — do not treat as "missing cell".
+        return None, None
+
     if value is None:
         warn.append(f"[row {row}] Missing {field}")
-        return None
+        return None, None
 
     s = str(value).strip()
     if s == "":
         warn.append(f"[row {row}] Empty {field}")
-        return None
+        return None, None
 
     try:
         if s.endswith("%"):
             s2 = s[:-1].strip()
-            return float(s2) / 100.0
-        # If no %, assume already a fraction like 0.12 / -0.05
-        return float(s)
+            return float(s2) / 100.0, "percent_suffix"
+        return float(s), "bare_numeric"
     except ValueError:
         warn.append(f"[row {row}] Could not parse {field}='{value}' as fraction")
-        return None
+        return None, None
