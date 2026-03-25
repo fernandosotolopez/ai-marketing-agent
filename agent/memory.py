@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 import json
 import os
@@ -65,12 +65,80 @@ class MemoryStore:
     def all_records(self) -> List[MemoryRecord]:
         return list(self._records)
 
+    def get_last_n_records(self, campaign_id: str, n: int) -> List[MemoryRecord]:
+        """
+        Returns the last N full records for a campaign (most recent last).
+        """
+        if n <= 0:
+            return []
+        filtered = [r for r in self._records if r.campaign_id == campaign_id]
+        return list(filtered[-n:])
+
     def get_last_n_states(self, campaign_id: str, n: int) -> List[Dict[str, Any]]:
         """
         Returns the last N state snapshots for a campaign (most recent last).
         """
-        filtered = [r for r in self._records if r.campaign_id == campaign_id]
-        return [r.state for r in filtered[-n:]]
+        return [r.state for r in self.get_last_n_records(campaign_id, n)]
+
+    def get_last_n_states_with_timestamps(self, campaign_id: str, n: int) -> List[Dict[str, Any]]:
+        """
+        Returns timestamped state snapshots so callers can reason about
+        recency/window semantics instead of only record counts.
+        """
+        return [
+            {
+                "timestamp_utc": record.timestamp_utc,
+                "state": dict(record.state),
+            }
+            for record in self.get_last_n_records(campaign_id, n)
+        ]
+
+    def get_records_in_lookback_days(
+        self,
+        campaign_id: str,
+        days: float,
+        reference_time_utc: Optional[datetime] = None,
+    ) -> List[MemoryRecord]:
+        """
+        Returns campaign records that fall within a calendar-day lookback window.
+        Invalid timestamps are skipped so bad memory rows do not break callers.
+        """
+        if days <= 0:
+            return []
+
+        reference = reference_time_utc or datetime.now(timezone.utc)
+        cutoff = reference - timedelta(days=days)
+        records_in_window: List[MemoryRecord] = []
+
+        for record in self.get_last_n_records(campaign_id, len(self._records)):
+            parsed_ts = self._parse_timestamp(record.timestamp_utc)
+            if parsed_ts is None:
+                continue
+            if parsed_ts >= cutoff:
+                records_in_window.append(record)
+
+        return records_in_window
+
+    def get_states_in_lookback_days(
+        self,
+        campaign_id: str,
+        days: float,
+        reference_time_utc: Optional[datetime] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Returns timestamped state snapshots inside a calendar-day lookback window.
+        """
+        return [
+            {
+                "timestamp_utc": record.timestamp_utc,
+                "state": dict(record.state),
+            }
+            for record in self.get_records_in_lookback_days(
+                campaign_id,
+                days,
+                reference_time_utc=reference_time_utc,
+            )
+        ]
 
     def get_last_decision(self, campaign_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -131,3 +199,14 @@ class MemoryStore:
         if callable(to_dict):
             return to_dict()
         raise TypeError(f"Object of type {type(obj).__name__} is not dict and has no to_dict()")
+
+    def _parse_timestamp(self, timestamp_utc: str) -> Optional[datetime]:
+        if not timestamp_utc:
+            return None
+        try:
+            parsed = datetime.fromisoformat(timestamp_utc)
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=timezone.utc)
+            return parsed
+        except Exception:
+            return None
