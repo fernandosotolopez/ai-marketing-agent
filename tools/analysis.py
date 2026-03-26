@@ -193,16 +193,20 @@ def analyze_campaign_row(
         severity = decision.get("severity")
         debug["agent_stance"] = stance
         debug["agent_severity"] = severity
+        goal_evaluations = decision.get("goal_evaluations") or []
+        recommendation_hierarchy = decision.get("recommendation_hierarchy") or []
+        debug["goal_evaluations"] = goal_evaluations
+        debug["recommendation_hierarchy"] = recommendation_hierarchy
 
-        # If agent says observe, soften actions to monitoring
-        if stance == "observe":
-            suggested_actions = [
-                "Monitor performance; avoid large changes until more evidence accumulates."
-            ] + [a for a in suggested_actions if "Collect more data" in a]
+        if goal_evaluations:
+            insights = _merge_goal_evaluation_insights(insights, goal_evaluations)
 
-        # If agent escalates, add stakeholder-facing action
-        if stance == "escalate":
-            suggested_actions.insert(0, "Escalate to a marketing owner with context and supporting metrics.")
+        deterministic_actions = _build_actions_from_decision(
+            decision=decision,
+            fallback_actions=suggested_actions,
+        )
+        if deterministic_actions:
+            suggested_actions = deterministic_actions
 
     # -------------------------
     # Overall risk score (simple heuristic)
@@ -259,3 +263,163 @@ def _dedupe_keep_order(items: List[str]) -> List[str]:
             out.append(x)
             seen.add(x)
     return out
+
+
+def _build_actions_from_decision(
+    *,
+    decision: Dict[str, Any],
+    fallback_actions: List[str],
+) -> List[str]:
+    stance = str(decision.get("stance") or "observe")
+    hierarchy = decision.get("recommendation_hierarchy") or []
+    goal_evaluations = decision.get("goal_evaluations") or []
+
+    if hierarchy:
+        return _hierarchy_actions(stance=stance, hierarchy=hierarchy)
+
+    if goal_evaluations:
+        return _goal_evaluation_actions(stance=stance, goal_evaluations=goal_evaluations)
+
+    if stance == "observe":
+        return ["Monitor performance; avoid large changes until more evidence accumulates."]
+    if stance == "escalate":
+        return ["Escalate to a marketing owner with context and supporting metrics."] + fallback_actions
+    return fallback_actions
+
+
+def _hierarchy_actions(*, stance: str, hierarchy: List[Dict[str, Any]]) -> List[str]:
+    actions: List[str] = []
+    for item in hierarchy:
+        label = "Primary" if int(item.get("priority") or 0) == 1 else "Secondary"
+        goal_name = str(item.get("goal_name") or "goal")
+        role = str(item.get("role") or "")
+        message = str(item.get("message") or item.get("reason") or "").strip()
+        if not message:
+            continue
+        actions.append(f"{label}: {_action_prefix(stance, goal_name, role, message)}")
+    return _dedupe_keep_order(actions)
+
+
+def _goal_evaluation_actions(*, stance: str, goal_evaluations: List[Dict[str, Any]]) -> List[str]:
+    unmet = [g for g in goal_evaluations if not g.get("met")]
+    if unmet:
+        synthetic_hierarchy = [
+            {
+                "priority": idx,
+                "goal_name": g.get("goal_name"),
+                "role": "primary_driver" if idx == 1 else "supporting_driver",
+                "message": g.get("message"),
+            }
+            for idx, g in enumerate(unmet, start=1)
+        ]
+        return _hierarchy_actions(stance=stance, hierarchy=synthetic_hierarchy)
+
+    evidence_notes = [
+        str(g.get("message") or "").strip()
+        for g in goal_evaluations
+        if _message_is_uncertain(str(g.get("message") or ""))
+    ]
+    if evidence_notes:
+        return [
+            "Primary: continue observing; no evaluated goal currently supports intervention.",
+            f"Secondary: keep confidence modest because {evidence_notes[0]}.",
+        ]
+
+    return ["Primary: continue observing; available goal checks do not support a change."]
+
+
+def _action_prefix(stance: str, goal_name: str, role: str, message: str) -> str:
+    evidence_qualified = _message_is_uncertain(message)
+
+    if role == "no_action" or goal_name == "all_goals":
+        return "continue observing; available goal checks do not support a change."
+
+    if role == "blocking_constraint":
+        return f"stay in observe mode because {message}."
+
+    if role == "deferred_context":
+        return f"keep this as supporting context while the primary gate is unresolved: {message}."
+
+    if goal_name == "cost_efficiency" and _message_mentions_configuration_issue(message):
+        return f"verify CPA/target configuration before changing spend because {message}."
+
+    if evidence_qualified:
+        if stance == "escalate":
+            return f"escalate for review, but keep the evidence caveat explicit because {message}."
+        if stance == "recommend":
+            return f"run a targeted review, but treat the evidence as provisional because {message}."
+        return f"continue monitoring because {message}."
+
+    if stance == "escalate":
+        return f"escalate to a marketing owner for review because {message}."
+    if stance == "recommend":
+        return f"run a targeted optimization review because {message}."
+    return f"continue monitoring because {message}."
+
+
+def _message_mentions_configuration_issue(message: str) -> bool:
+    lowered = message.lower()
+    return "missing cpa" in lowered or "target_cpa" in lowered or "invalid target_cpa" in lowered
+
+
+def _message_is_uncertain(message: str) -> bool:
+    lowered = message.lower()
+    markers = (
+        "weak",
+        "partial",
+        "unavailable",
+        "unverified",
+        "not verified",
+        "snapshot-derived",
+        "collect more data",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+def _merge_goal_evaluation_insights(
+    insights: List[Insight],
+    goal_evaluations: List[Dict[str, Any]],
+) -> List[Insight]:
+    existing = {(ins.category, ins.message) for ins in insights}
+    merged = list(insights)
+
+    for evaluation in goal_evaluations:
+        message = str(evaluation.get("message") or "").strip()
+        if not message:
+            continue
+        if not _should_surface_goal_evaluation(evaluation):
+            continue
+
+        category = _goal_category(str(evaluation.get("goal_name") or ""))
+        insight = Insight(
+            category=category,
+            message=message,
+            importance=_goal_importance(evaluation),
+        )
+        key = (insight.category, insight.message)
+        if key not in existing:
+            merged.append(insight)
+            existing.add(key)
+
+    return merged
+
+
+def _should_surface_goal_evaluation(evaluation: Dict[str, Any]) -> bool:
+    if not evaluation.get("met"):
+        return False
+    return _message_is_uncertain(str(evaluation.get("message") or ""))
+
+
+def _goal_category(goal_name: str) -> str:
+    return {
+        "campaign_maturity": "maturity",
+        "cost_efficiency": "efficiency",
+        "performance_trend": "trend",
+    }.get(goal_name, "risk")
+
+
+def _goal_importance(evaluation: Dict[str, Any]) -> str:
+    severity = str(evaluation.get("severity") or "low").lower()
+    if severity in {"low", "medium", "high"}:
+        return severity
+    return "low"
