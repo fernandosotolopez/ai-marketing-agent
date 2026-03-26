@@ -40,6 +40,13 @@ OPTIONAL_COLS = [
     "risk_score",
     "why_flagged",
     "run_id",
+    "reasons",
+    "reasons_text",
+    "decision_explanation",
+    "warnings",
+    "warning_count",
+    "provenance",
+    "execution_metadata",
     "advisor_summary",
     "advisor_actions",
     "advisor_confidence",
@@ -56,6 +63,7 @@ OPTIONAL_COLS = [
 ]
 
 SEVERITY_ORDER = {"high": 3, "medium": 2, "low": 1, "unknown": 0}
+STANCE_ORDER = {"escalate": 3, "adjust": 2, "observe": 1, "unknown": 0}
 
 
 def _safe_float(x, default=np.nan) -> float:
@@ -114,6 +122,120 @@ def _short_reason(why_flagged: Any, max_len: int = 120) -> str:
     return first
 
 
+def _clean_text(value: Any) -> str:
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return ""
+    text = str(value).strip()
+    if not text or text.lower() == "nan":
+        return ""
+    return text
+
+
+def _string_list(value: Any) -> List[str]:
+    if isinstance(value, list):
+        return [_clean_text(item) for item in value if _clean_text(item)]
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return []
+    text = _clean_text(value)
+    return [text] if text else []
+
+
+def _decision_explanation_from_row(row: pd.Series) -> str:
+    reasons = row.get("reasons", [])
+    if isinstance(reasons, list):
+        for reason in reasons:
+            clean = _clean_text(reason)
+            if clean:
+                return clean
+
+    for key in ["analysis_summary", "advisor_summary", "why_flagged"]:
+        clean = _clean_text(row.get(key))
+        if clean:
+            return clean
+    return ""
+
+
+def _format_pct(value: Any) -> str:
+    if pd.isna(value):
+        return "—"
+    return f"{float(value) * 100:+.0f}%"
+
+
+def _format_risk_label(value: Any) -> str:
+    sev = _clean_text(value).lower()
+    return sev.upper() if sev in {"high", "medium", "low"} else "UNKNOWN"
+
+
+def _build_evidence_bits(row: pd.Series) -> List[str]:
+    bits: List[str] = []
+
+    cpa = row.get("cpa")
+    target_cpa = row.get("target_cpa")
+    roas = row.get("roas")
+    cpa_trend = row.get("cpa_trend_7d")
+    roas_trend = row.get("roas_trend_7d")
+    days_active = row.get("days_active")
+
+    if pd.notna(cpa) and pd.notna(target_cpa):
+        bits.append(f"CPA {float(cpa):.2f} vs target {float(target_cpa):.2f}")
+    elif pd.notna(cpa):
+        bits.append(f"CPA {float(cpa):.2f}")
+
+    if pd.notna(roas):
+        bits.append(f"ROAS {float(roas):.2f}")
+
+    if pd.notna(cpa_trend):
+        bits.append(f"CPA 7d {_format_pct(cpa_trend)}")
+
+    if pd.notna(roas_trend):
+        bits.append(f"ROAS 7d {_format_pct(roas_trend)}")
+
+    if pd.notna(days_active):
+        bits.append(f"{int(days_active)} days active")
+
+    return bits
+
+
+def sort_campaigns_for_review(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df.copy()
+
+    out = df.copy()
+    out["_severity_rank"] = out["severity"].map(SEVERITY_ORDER).fillna(0)
+    out["_stance_rank"] = out["stance"].map(STANCE_ORDER).fillna(0)
+    if "warning_count" not in out.columns:
+        out["warning_count"] = 0
+    out["_warning_rank"] = out["warning_count"].fillna(0)
+    out = out.sort_values(
+        ["_severity_rank", "_stance_rank", "_warning_rank", "campaign_id"],
+        ascending=[False, False, False, True],
+    )
+    return out.drop(columns=["_severity_rank", "_stance_rank", "_warning_rank"], errors="ignore")
+
+
+def build_campaign_display_df(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame(
+            columns=["campaign_id", "stance", "risk", "explanation", "evidence", "warnings"]
+        )
+
+    rows: List[Dict[str, Any]] = []
+    for _, row in sort_campaigns_for_review(df).iterrows():
+        warnings = row.get("warnings", [])
+        warning_text = " | ".join(warnings[:2]) if isinstance(warnings, list) else ""
+        rows.append(
+            {
+                "campaign_id": row.get("campaign_id"),
+                "stance": _clean_text(row.get("stance")).upper() or "UNKNOWN",
+                "risk": _format_risk_label(row.get("severity")),
+                "explanation": _decision_explanation_from_row(row),
+                "evidence": " | ".join(_build_evidence_bits(row)),
+                "warnings": warning_text,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def compute_risk_score(df: pd.DataFrame) -> pd.Series:
     """
     Heuristic risk score (dashboard-side).
@@ -167,7 +289,7 @@ def default_why_flagged(row: pd.Series) -> str:
     return " | ".join(msgs)
 
 
-def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
+def normalize_df(df: pd.DataFrame, *, fill_dashboard_fallbacks: bool = True) -> pd.DataFrame:
     """Normalize column names & dtypes, add missing columns if needed."""
     df = df.copy()
     df.columns = [c.strip() for c in df.columns]
@@ -206,12 +328,41 @@ def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
     # ratios for visual clarity
     df["cpa_ratio"] = (df["cpa"] / df["target_cpa"]).replace([np.inf, -np.inf], np.nan)
 
-    if df["risk_score"].isna().all():
+    if "reasons" not in df.columns:
+        df["reasons"] = [[] for _ in range(len(df))]
+    else:
+        df["reasons"] = df["reasons"].apply(_string_list)
+
+    if "warnings" not in df.columns:
+        df["warnings"] = [[] for _ in range(len(df))]
+    else:
+        df["warnings"] = df["warnings"].apply(_string_list)
+
+    if "provenance" not in df.columns:
+        df["provenance"] = [{} for _ in range(len(df))]
+
+    if "execution_metadata" not in df.columns:
+        df["execution_metadata"] = [{} for _ in range(len(df))]
+
+    df["warning_count"] = df["warnings"].apply(lambda x: len(x) if isinstance(x, list) else 0)
+    df["reasons_text"] = df["reasons"].apply(lambda x: " | ".join(x) if isinstance(x, list) and x else pd.NA)
+
+    if fill_dashboard_fallbacks and df["risk_score"].isna().all():
         df["risk_score"] = compute_risk_score(df)
 
     missing_why = df["why_flagged"].isna() | (df["why_flagged"].astype("string").str.strip() == "")
-    if missing_why.any():
+    if fill_dashboard_fallbacks and missing_why.any():
         df.loc[missing_why, "why_flagged"] = df[missing_why].apply(default_why_flagged, axis=1)
+
+    if "decision_explanation" not in df.columns:
+        df["decision_explanation"] = pd.NA
+    missing_explanation = df["decision_explanation"].isna() | (
+        df["decision_explanation"].astype("string").str.strip() == ""
+    )
+    if missing_explanation.any():
+        df.loc[missing_explanation, "decision_explanation"] = df[missing_explanation].apply(
+            _decision_explanation_from_row, axis=1
+        )
 
     return df
 
@@ -293,9 +444,23 @@ def list_db_runs(db_path: Path) -> pd.DataFrame:
 
     con = sqlite3.connect(str(db_path))
     try:
+        run_cols = {row[1] for row in con.execute("PRAGMA table_info(runs)").fetchall()}
+        select_cols = [
+            "run_id",
+            "started_at_utc",
+            "input_csv",
+            "max_rows",
+            "save_memory",
+            "model",
+            "used_llm",
+            "notes",
+        ]
+        if "run_metadata_json" in run_cols:
+            select_cols.append("run_metadata_json")
+        else:
+            select_cols.append("'{}' AS run_metadata_json")
         df = pd.read_sql_query(
-            "SELECT run_id, started_at_utc, input_csv, max_rows, save_memory, model, used_llm, notes "
-            "FROM runs ORDER BY started_at_utc DESC",
+            f"SELECT {', '.join(select_cols)} FROM runs ORDER BY started_at_utc DESC",
             con,
         )
     finally:
@@ -321,11 +486,54 @@ def load_db_run_outputs(db_path: Path, run_id: str) -> pd.DataFrame:
 
     con = sqlite3.connect(str(db_path))
     try:
+        campaign_cols = {row[1] for row in con.execute("PRAGMA table_info(campaign_outputs)").fetchall()}
+        run_cols = {row[1] for row in con.execute("PRAGMA table_info(runs)").fetchall()}
+
+        select_cols = [
+            "co.run_id",
+            "co.campaign_id",
+            "co.stance",
+            "co.severity",
+            "co.cpa",
+            "co.roas",
+            "co.target_cpa",
+            "co.cpa_trend_7d",
+            "co.roas_trend_7d",
+            "co.days_active",
+            "co.state_json",
+            "co.decision_json",
+            "co.analysis_json",
+            "co.advisor_json",
+            "co.scenarios_json",
+            "r.started_at_utc AS run_started_at_utc",
+            "r.input_csv AS run_input_csv",
+            "r.max_rows AS run_max_rows",
+            "r.save_memory AS run_save_memory",
+            "r.model AS run_model",
+            "r.used_llm AS run_used_llm",
+            "r.notes AS run_notes",
+        ]
+        if "run_metadata_json" in run_cols:
+            select_cols.append("r.run_metadata_json")
+        else:
+            select_cols.append("'{}' AS run_metadata_json")
+
+        optional_json_defaults = {
+            "warnings_json": "'[]' AS warnings_json",
+            "provenance_json": "'{}' AS provenance_json",
+            "execution_metadata_json": "'{}' AS execution_metadata_json",
+        }
+        for col, default_sql in optional_json_defaults.items():
+            if col in campaign_cols:
+                select_cols.append(f"co.{col}")
+            else:
+                select_cols.append(default_sql)
+
         df = pd.read_sql_query(
-            "SELECT run_id, campaign_id, stance, severity, "
-            "cpa, roas, target_cpa, cpa_trend_7d, roas_trend_7d, days_active, "
-            "state_json, decision_json, analysis_json, advisor_json, scenarios_json "
-            "FROM campaign_outputs WHERE run_id = ?",
+            f"SELECT {', '.join(select_cols)} "
+            "FROM campaign_outputs co "
+            "LEFT JOIN runs r ON r.run_id = co.run_id "
+            "WHERE co.run_id = ?",
             con,
             params=(run_id,),
         )
@@ -335,15 +543,37 @@ def load_db_run_outputs(db_path: Path, run_id: str) -> pd.DataFrame:
     if df.empty:
         return df
 
-    def _reasons_to_why(dec_json: Any) -> Any:
+    def _decision_fields(dec_json: Any) -> Dict[str, Any]:
         d = _safe_json_loads(dec_json, {})
-        reasons = d.get("reasons") if isinstance(d, dict) else None
-        if not reasons:
-            return pd.NA
-        parts = [str(r).strip() for r in reasons if str(r).strip()]
-        return " | ".join(parts) if parts else pd.NA
+        if not isinstance(d, dict):
+            return {
+                "reasons": [],
+                "reasons_text": pd.NA,
+                "decision_explanation": pd.NA,
+                "decision_stance": pd.NA,
+                "decision_severity": pd.NA,
+            }
+        reasons = _string_list(d.get("reasons"))
+        joined = " | ".join(reasons) if reasons else pd.NA
+        return {
+            "reasons": reasons,
+            "reasons_text": joined,
+            "decision_explanation": reasons[0] if reasons else pd.NA,
+            "decision_stance": d.get("stance", pd.NA),
+            "decision_severity": d.get("severity", pd.NA),
+        }
 
-    df["why_flagged"] = df["decision_json"].apply(_reasons_to_why)
+    decision_expanded = df["decision_json"].apply(_decision_fields).apply(pd.Series)
+    for c in decision_expanded.columns:
+        df[c] = decision_expanded[c]
+
+    df["why_flagged"] = df["reasons_text"]
+    missing_stance = df["stance"].isna() | (df["stance"].astype("string").str.strip() == "")
+    if missing_stance.any():
+        df.loc[missing_stance, "stance"] = df.loc[missing_stance, "decision_stance"]
+    missing_severity = df["severity"].isna() | (df["severity"].astype("string").str.strip() == "")
+    if missing_severity.any():
+        df.loc[missing_severity, "severity"] = df.loc[missing_severity, "decision_severity"]
 
     def _advisor_fields(ad_json: Any) -> Dict[str, Any]:
         a = _safe_json_loads(ad_json, {})
@@ -419,7 +649,19 @@ def load_db_run_outputs(db_path: Path, run_id: str) -> pd.DataFrame:
 
     df["scenarios"] = df["scenarios_json"].apply(_scenarios_list)
 
-    df = normalize_df(df)
+    def _warning_list(w_json: Any) -> List[str]:
+        return _string_list(_safe_json_loads(w_json, []))
+
+    def _dict_json(v: Any) -> Dict[str, Any]:
+        parsed = _safe_json_loads(v, {})
+        return parsed if isinstance(parsed, dict) else {}
+
+    df["warnings"] = df["warnings_json"].apply(_warning_list)
+    df["provenance"] = df["provenance_json"].apply(_dict_json)
+    df["execution_metadata"] = df["execution_metadata_json"].apply(_dict_json)
+    df["run_metadata"] = df["run_metadata_json"].apply(_dict_json)
+
+    df = normalize_df(df, fill_dashboard_fallbacks=False)
     return df
 
 
@@ -444,15 +686,11 @@ def make_scatter_ratio(df: pd.DataFrame) -> go.Figure:
       X = CPA / target_CPA (1.0 is on target)
       Y = ROAS (1.0 is break-even pre-LTV)
     """
-    size = df["risk_score"].fillna(0).clip(lower=0)
-    size = (np.sqrt(size + 1) * 8).clip(8, 34)
-
     fig = px.scatter(
         df,
         x="cpa_ratio",
         y="roas",
         color="severity",
-        size=size,
         hover_data={
             "campaign_id": True,
             "run_id": True,
@@ -465,8 +703,8 @@ def make_scatter_ratio(df: pd.DataFrame) -> go.Figure:
             "cpa_trend_7d": ":.2f",
             "roas_trend_7d": ":.2f",
             "days_active": True,
-            "risk_score": ":.2f",
-            "why_flagged": True,
+            "decision_explanation": True,
+            "warning_count": True,
         },
     )
 
@@ -625,6 +863,24 @@ else:  # Runs folder
 
 st.caption(run_meta)
 
+if source_mode == "SQLite (agent_runs.db)" and not df_run.empty:
+    run_row = df_run.iloc[0]
+    run_bits = []
+    for label, key in [
+        ("started", "run_started_at_utc"),
+        ("input", "run_input_csv"),
+        ("model", "run_model"),
+        ("used_llm", "run_used_llm"),
+    ]:
+        value = _clean_text(run_row.get(key))
+        if value:
+            run_bits.append(f"{label}={value}")
+    notes_text = _clean_text(run_row.get("run_notes"))
+    if notes_text:
+        run_bits.append(f"notes={notes_text}")
+    if run_bits:
+        st.caption("Run context: " + " | ".join(run_bits))
+
 # Filters
 all_stances = sorted([s for s in df_run["stance"].dropna().unique() if str(s).strip()])
 all_severities = sorted(
@@ -642,26 +898,12 @@ df_f = apply_filters(df_run, stance_filter, severity_filter, search_id)
 # NEW: Today’s Queue (top action list)
 # -----------------------------
 st.subheader("✅ Today’s Queue (what to review first)")
-st.caption("This is your prioritized review list. Each card shows the top reason + the next action.")
+st.caption("This review list is ordered by persisted severity and stance, with explanations pulled from the stored agent output.")
 
 if df_f.empty:
     st.info("No campaigns match the current filters.")
 else:
-    df_queue = df_f.sort_values("risk_score", ascending=False).head(5).copy()
-
-    # choose a 1-line next action
-    def _next_action(row: pd.Series) -> str:
-        actions = row.get("advisor_actions", [])
-        if isinstance(actions, list) and actions:
-            return str(actions[0]).strip()
-        # fallback to deterministic analysis suggested actions
-        acts = row.get("analysis_suggested_actions", [])
-        if isinstance(acts, list) and acts:
-            return str(acts[0]).strip()
-        return "Review metrics and investigate root cause."
-
-    df_queue["queue_reason"] = df_queue["why_flagged"].apply(_short_reason)
-    df_queue["queue_next_action"] = df_queue.apply(_next_action, axis=1)
+    df_queue = sort_campaigns_for_review(df_f).head(5).copy()
 
     # allow click-to-open via session_state
     if "selected_campaign" not in st.session_state:
@@ -671,21 +913,29 @@ else:
         cid = str(r["campaign_id"])
         sev = str(r.get("severity", "—"))
         stance = str(r.get("stance", "—"))
-        reason = r.get("queue_reason", "")
-        next_action = r.get("queue_next_action", "")
+        reason = _short_reason(r.get("decision_explanation"), max_len=150)
+        advisor_actions = r.get("advisor_actions", [])
+        evidence = " | ".join(_build_evidence_bits(r))
+        warnings = r.get("warnings", [])
 
         with st.container(border=True):
             top = st.columns([3, 1])
             with top[0]:
-                st.markdown(f"**{cid}**  •  stance=`{stance}`  •  severity=`{sev}`")
+                st.markdown(
+                    f"**{cid}**  •  stance=`{stance}`  •  risk=`{_format_risk_label(sev)}`"
+                )
             with top[1]:
                 if st.button("Open", key=f"open_{cid}"):
                     st.session_state["selected_campaign"] = cid
 
             if reason:
-                st.write(f"**Why:** {reason}")
-            if next_action:
-                st.write(f"**Next:** {next_action}")
+                st.write(f"**Explanation:** {reason}")
+            if evidence:
+                st.caption(evidence)
+            if isinstance(advisor_actions, list) and advisor_actions:
+                st.write(f"**Recommended action:** {advisor_actions[0]}")
+            if isinstance(warnings, list) and warnings:
+                st.warning("Warning: " + warnings[0])
 
 # Tabs
 tab_overview, tab_details, tab_all = st.tabs(["📌 Overview", "🧠 Campaign details", "📋 All campaigns"])
@@ -711,33 +961,22 @@ with tab_overview:
 
     st.divider()
 
-    st.subheader("🔥 Top risks table")
-    st.caption("Ranked by heuristic risk_score (triage).")
-    df_top = df_f.sort_values("risk_score", ascending=False).head(10).copy()
-
-    show_cols = [
-        "campaign_id", "stance", "severity",
-        "cpa", "target_cpa", "cpa_ratio",
-        "roas", "cpa_trend_7d", "roas_trend_7d",
-        "days_active", "risk_score", "why_flagged",
-    ]
-    if "run_id" in df_top.columns and df_top["run_id"].notna().any():
-        show_cols = ["run_id"] + show_cols
-    show_cols = [c for c in show_cols if c in df_top.columns]
-
-    st.dataframe(df_top[show_cols], use_container_width=True, hide_index=True)
+    st.subheader("Decision queue")
+    st.caption("Ordered by persisted severity and stance, with agent explanations and supporting evidence.")
+    df_top = build_campaign_display_df(sort_campaigns_for_review(df_f).head(10))
+    st.dataframe(df_top, use_container_width=True, hide_index=True)
 
     st.download_button(
-        "⬇️ Download CSV (Top risks)",
-        data=df_top[show_cols].to_csv(index=False).encode("utf-8"),
-        file_name="top_risks.csv",
+        "⬇️ Download CSV (Decision queue)",
+        data=df_top.to_csv(index=False).encode("utf-8"),
+        file_name="decision_queue.csv",
         mime="text/csv",
     )
 
     st.divider()
 
-    st.subheader("📈 Efficiency vs Profitability (easy view)")
-    st.caption("How to read: Right of 1.0 = CPA above target. Below 1.0 = losing money (pre-LTV). Bigger bubble = higher triage risk.")
+    st.subheader("📈 Efficiency vs Profitability")
+    st.caption("Right of 1.0 = CPA above target. Below 1.0 = ROAS under 1.0. Color reflects persisted risk severity.")
 
     fig = make_scatter_ratio(df_f)
     st.plotly_chart(fig, use_container_width=True)
@@ -752,9 +991,7 @@ with tab_details:
 
     # Use the queue-selected campaign by default
     default_campaign = st.session_state.get("selected_campaign", df_f["campaign_id"].iloc[0])
-    campaign_options = (
-        df_f.sort_values(["risk_score", "campaign_id"], ascending=[False, True])["campaign_id"].tolist()
-    )
+    campaign_options = sort_campaigns_for_review(df_f)["campaign_id"].tolist()
     if default_campaign not in campaign_options:
         default_campaign = campaign_options[0]
     idx = campaign_options.index(default_campaign)
@@ -778,18 +1015,35 @@ with tab_details:
 
     st.divider()
 
-    # Why flagged
-    why_val = row.get("why_flagged")
-    st.markdown("### 🧾 Why flagged (deterministic agent reasons)")
-    if pd.isna(why_val):
-        st.write("- —")
+    st.markdown("### Decision")
+    st.write(f"**Risk:** {_format_risk_label(row.get('severity'))}")
+
+    explanation = _clean_text(row.get("decision_explanation"))
+    if explanation:
+        st.write(f"**Short explanation:** {explanation}")
+
+    evidence_bits = _build_evidence_bits(row)
+    if evidence_bits:
+        st.write("**Supporting evidence:**")
+        for bit in evidence_bits:
+            st.write(f"- {bit}")
+
+    reasons = row.get("reasons", [])
+    st.write("**Persisted reasons:**")
+    if isinstance(reasons, list) and reasons:
+        for reason in reasons:
+            st.write(f"- {reason}")
     else:
-        parts = [r.strip() for r in str(why_val).split("|") if r.strip()]
-        for r in parts:
-            st.write(f"- {r}")
+        st.write("- —")
+
+    warnings = row.get("warnings", [])
+    if isinstance(warnings, list) and warnings:
+        st.write("**Warnings / data quality notes:**")
+        for warning in warnings:
+            st.write(f"- {warning}")
 
     # Advisor
-    st.markdown("### ✅ Action plan (Advisor)")
+    st.markdown("### Advisor")
     advisor_summary = row.get("advisor_summary", pd.NA)
     advisor_actions = row.get("advisor_actions", [])
 
@@ -804,13 +1058,13 @@ with tab_details:
     if pd.notna(advisor_summary) and str(advisor_summary).strip():
         st.write(str(advisor_summary))
     else:
-        st.caption("No advisor summary available.")
+        st.caption("No advisor summary was stored for this campaign.")
 
     if isinstance(advisor_actions, list) and advisor_actions:
         for i, a in enumerate(advisor_actions, 1):
             st.write(f"{i}. {a}")
     else:
-        st.caption("No advisor actions available.")
+        st.caption("No advisor actions were stored for this campaign.")
 
     st.divider()
 
@@ -832,10 +1086,10 @@ with tab_details:
     st.divider()
 
     # Analysis
-    st.markdown("### 🔎 Analysis (deterministic)")
+    st.markdown("### Analysis")
     analysis_sum = row.get("analysis_summary", pd.NA)
     if pd.notna(analysis_sum) and str(analysis_sum).strip():
-        st.caption(str(analysis_sum))
+        st.write(str(analysis_sum))
 
     st.markdown("**Insights**")
     ins = row.get("analysis_insights", [])
@@ -853,6 +1107,15 @@ with tab_details:
     else:
         st.write("- —")
 
+    provenance = row.get("provenance", {})
+    execution_metadata = row.get("execution_metadata", {})
+    if isinstance(provenance, dict) and provenance:
+        with st.expander("Metric provenance", expanded=False):
+            st.json(provenance)
+    if isinstance(execution_metadata, dict) and execution_metadata:
+        with st.expander("Execution metadata", expanded=False):
+            st.json(execution_metadata)
+
     if developer_mode:
         with st.expander("Raw row JSON", expanded=False):
             st.code(json.dumps(row.to_dict(), indent=2, default=str), language="json")
@@ -862,12 +1125,11 @@ with tab_details:
 # -----------------------------
 with tab_all:
     st.subheader("All campaigns (filtered)")
-    st.dataframe(df_f.sort_values("risk_score", ascending=False), use_container_width=True, hide_index=True)
+    df_all = build_campaign_display_df(df_f)
+    st.dataframe(df_all, use_container_width=True, hide_index=True)
     st.download_button(
         "⬇️ Download CSV (filtered)",
-        data=df_f.to_csv(index=False).encode("utf-8"),
+        data=df_all.to_csv(index=False).encode("utf-8"),
         file_name="campaigns_filtered.csv",
         mime="text/csv",
     )
-
-st.caption("Tip: If you add spend/revenue/conversions, you can prioritize by $ impact, not just efficiency ratios.")
