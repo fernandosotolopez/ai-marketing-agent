@@ -93,6 +93,12 @@ def scenarios_to_jsonable(scenarios: Any) -> Any:
     return out
 
 
+def _append_unique_text(items: list[str], value: Any) -> None:
+    text = str(value or "").strip()
+    if text and text not in items:
+        items.append(text)
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run marketing agent on a campaign CSV.")
 
@@ -176,6 +182,29 @@ def main() -> None:
         else:
             max_rows = len(rows)
 
+        initial_run_metadata: Dict[str, Any] = {
+            "phase": "phase_1_block_4",
+            "pipeline_order": [
+                "load_campaign_csv",
+                "validate_and_enrich_row",
+                "AgentLoop.run",
+                "analyze_campaign_row",
+                "run_budget_scenarios",
+                "format_console_report",
+                "LLMAdvisor.advise",
+                "save_campaign_output",
+                "MemoryStore.add",
+                "MemoryStore.save_json",
+            ],
+            "csv_load_warnings": list(load_result.warnings),
+            "csv_load_warning_count": len(load_result.warnings),
+            "requested_max_rows": int(args.max_rows),
+            "effective_max_rows": int(max_rows),
+            "input_memory_path": str(memory_path),
+            "save_memory_requested": int(args.save_memory),
+            "advisor_configured_model": getattr(advisor, "model", None),
+        }
+
         # Create a run record once per execution
         run_id = run_db.start_run(
             con,
@@ -185,8 +214,14 @@ def main() -> None:
             model=None,
             used_llm=None,
             notes="",
+            run_metadata=initial_run_metadata,
         )
         print(f"[DB] run_id={run_id} (saving outputs to data/agent_runs.db)\n")
+
+        persisted_rows = 0
+        skipped_validation_rows = []
+        advisor_used_llm = False
+        advisor_models_seen: list[str] = []
 
         for i in range(max_rows):
             row = rows[i]
@@ -201,6 +236,14 @@ def main() -> None:
                 for e in metrics_result.errors:
                     print(f"  - {e}")
                 print()
+                skipped_validation_rows.append(
+                    {
+                        "row_index": i + 1,
+                        "campaign_id": row.get("campaign_id"),
+                        "errors": list(metrics_result.errors),
+                        "warnings": list(metrics_result.warnings),
+                    }
+                )
                 continue
 
             enriched: Dict[str, Any] = metrics_result.row
@@ -248,17 +291,39 @@ def main() -> None:
 
             print("\n" + ("#" * 72) + "\n")
 
+            enriched_json = to_jsonable(enriched)
+            decision_json = to_jsonable(decision)
+            analysis_json = to_jsonable(analysis)
+            advisor_json = to_jsonable(advice)
+            scenarios_json = scenarios_to_jsonable(scenarios)
+            provenance_json = {}
+            if isinstance(enriched_json, dict):
+                provenance_json = to_jsonable(enriched_json.get("_metric_provenance") or {})
+            execution_metadata = {
+                "row_index": i + 1,
+                "metrics_warning_count": len(metrics_result.warnings),
+                "advisor_used_llm": advisor_json.get("advisor_used_llm") if isinstance(advisor_json, dict) else None,
+                "advisor_model": advisor_json.get("advisor_model") if isinstance(advisor_json, dict) else None,
+            }
+
             # Save to SQLite (run history)
             run_db.save_campaign_output(
                 con,
                 run_id=run_id,
                 campaign_id=campaign_id,
-                state=enriched,
-                decision=decision,
-                analysis=to_jsonable(analysis),
-                advisor=to_jsonable(advice),
-                scenarios=scenarios_to_jsonable(scenarios),
+                state=enriched_json,
+                decision=decision_json,
+                analysis=analysis_json,
+                advisor=advisor_json,
+                scenarios=scenarios_json,
+                warnings=list(metrics_result.warnings),
+                provenance=provenance_json,
+                execution_metadata=execution_metadata,
             )
+            persisted_rows += 1
+            if isinstance(advisor_json, dict):
+                advisor_used_llm = advisor_used_llm or bool(advisor_json.get("advisor_used_llm"))
+                _append_unique_text(advisor_models_seen, advisor_json.get("advisor_model"))
 
             # 3g) Store memory (in RAM)
             memory.add(campaign_id=campaign_id, state=enriched, decision=decision)
@@ -270,6 +335,30 @@ def main() -> None:
             print(f"Saved memory to: {memory_path}")
         else:
             print("Memory NOT saved (save-memory=0).")
+
+        run_notes = (
+            f"csv_load_warnings={len(load_result.warnings)}; "
+            f"rows_persisted={persisted_rows}; "
+            f"rows_skipped_validation={len(skipped_validation_rows)}"
+        )
+        final_run_metadata: Dict[str, Any] = {
+            **initial_run_metadata,
+            "rows_in_csv": len(rows),
+            "rows_persisted": persisted_rows,
+            "rows_skipped_validation_count": len(skipped_validation_rows),
+            "skipped_validation_rows": to_jsonable(skipped_validation_rows),
+            "advisor_used_llm": advisor_used_llm,
+            "advisor_models_seen": advisor_models_seen,
+            "memory_saved": args.save_memory == 1,
+        }
+        run_db.finalize_run(
+            con,
+            run_id=run_id,
+            model=advisor_models_seen[0] if advisor_models_seen else None,
+            used_llm=advisor_used_llm,
+            notes=run_notes,
+            run_metadata=final_run_metadata,
+        )
 
     finally:
         con.close()
