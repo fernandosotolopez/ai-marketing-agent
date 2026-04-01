@@ -961,7 +961,6 @@ st.caption(
 # Sidebar
 st.sidebar.header("Review controls")
 developer_mode = st.sidebar.toggle("Show technical details", value=False)
-presentation_mode = st.sidebar.toggle("Presentation mode", value=True)
 
 if developer_mode:
     with st.expander("Technical paths", expanded=False):
@@ -1079,37 +1078,21 @@ df_f = apply_filters(df_run, stance_filter, severity_filter, search_id)
 portfolio_signal = _portfolio_signal_text(df_f)
 top_issue = _top_portfolio_issue(sort_campaigns_for_review(df_f).head(5)) if not df_f.empty else ""
 action_count = int(df_f["stance"].isin(["escalate", "recommend", "adjust"]).sum()) if not df_f.empty else 0
+next_step_text = "Open an executive brief from the queue below to review the core recommendation."
+if action_count == 0:
+    next_step_text = "Start with the executive brief below to confirm the portfolio is currently in monitor mode."
 
-hero_left, hero_right = st.columns([2.5, 1.5])
-with hero_left:
-    st.markdown(
-        f"""
-        <div class="hero-card">
-            <div class="hero-eyebrow">Phase 1 portfolio artifact</div>
-            <div class="hero-title">Executive review surface for AI-assisted marketing decisions</div>
-            <div class="hero-text">{portfolio_signal}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-with hero_right:
-    walkthrough_lines = [
-        "Start with the priority queue to see what needs action.",
-        "Open an executive brief to review rationale and next steps.",
-        "Use illustrative scenarios to support discussion, not prediction.",
-    ]
-    walkthrough_html = "".join(f"<li>{line}</li>" for line in walkthrough_lines)
-    st.markdown(
-        f"""
-        <div class="summary-card">
-            <div class="summary-label">Suggested demo walkthrough</div>
-            <div class="summary-text">
-                <ol class="compact-list">{walkthrough_html}</ol>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+st.markdown(
+    f"""
+    <div class="hero-card">
+        <div class="hero-eyebrow">Phase 1 portfolio artifact</div>
+        <div class="hero-title">Executive review surface for AI-assisted marketing decisions</div>
+        <div class="hero-text">{portfolio_signal}</div>
+        <div class="hero-text"><strong>Next step:</strong> {next_step_text}</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 # -----------------------------
 # Priority review queue
@@ -1120,7 +1103,7 @@ st.caption("Start here: the queue below surfaces the campaigns most likely to ne
 if df_f.empty:
     st.info("No campaigns match the current filters.")
 else:
-    df_queue = sort_campaigns_for_review(df_f).head(5).copy()
+    df_queue = sort_campaigns_for_review(df_f).head(4).copy()
     summary_bits = [f"{action_count} campaign(s) currently need attention"]
     if top_issue:
         summary_bits.append(f"Top issue: {top_issue}")
@@ -1134,38 +1117,31 @@ else:
         cid = str(r["campaign_id"])
         sev = str(r.get("severity", "—"))
         stance = str(r.get("stance", "—"))
-        reason = _short_reason(r.get("decision_explanation"), max_len=150)
-        advisor_actions = r.get("advisor_actions", [])
+        reason = _short_reason(r.get("decision_explanation"), max_len=110)
         decision_label = _format_decision_label(stance)
         priority_label = _format_risk_label(sev).title()
         reason = _humanize_reason(reason)
-        evidence = _key_evidence_line(r)
-        warnings = r.get("warnings", [])
+        evidence = _key_evidence_line(r, max_items=1)
 
         with st.container(border=True):
-            top = st.columns([4, 1])
-            with top[0]:
+            row_cols = st.columns([2.6, 4.4, 2.4, 1.2])
+            with row_cols[0]:
                 st.markdown(f"**Campaign {cid}**")
                 st.markdown(
                     _badge_html(decision_label, _decision_css_class(stance))
                     + _badge_html(f"{priority_label} priority", _priority_css_class(sev)),
                     unsafe_allow_html=True,
                 )
-            with top[1]:
-                if st.button("Open brief", key=f"open_{cid}"):
+            with row_cols[1]:
+                st.markdown(reason or "No summary available.")
+            with row_cols[2]:
+                st.caption(evidence or "No evidence summary available.")
+            with row_cols[3]:
+                if st.button("Open executive brief", key=f"open_{cid}"):
                     st.session_state["selected_campaign"] = cid
 
-            if reason:
-                st.write(reason)
-            if evidence:
-                st.caption("Key evidence: " + evidence)
-            if isinstance(advisor_actions, list) and advisor_actions:
-                st.write(f"**Recommended next step:** {advisor_actions[0]}")
-            if isinstance(warnings, list) and warnings:
-                st.caption("Data note: " + _humanize_reason(warnings[0]))
-
 # Tabs
-tab_overview, tab_details, tab_all = st.tabs(["📌 Portfolio overview", "🧠 Executive brief", "📋 Campaign table"])
+tab_details, tab_overview, tab_all = st.tabs(["🧠 Executive brief", "📌 Portfolio overview", "📋 Campaign table"])
 
 # -----------------------------
 # Overview (simplified & clearer)
@@ -1192,58 +1168,7 @@ with tab_overview:
         )
 
     st.divider()
-
-    s1, s2, s3 = st.columns(3)
-    with s1:
-        st.markdown(
-            f"""
-            <div class="summary-card">
-                <div class="summary-label">Portfolio signal</div>
-                <div class="summary-value">{portfolio_signal}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with s2:
-        primary_focus = top_issue or "No major issue is currently surfaced."
-        st.markdown(
-            f"""
-            <div class="summary-card">
-                <div class="summary-label">Primary focus</div>
-                <div class="summary-value">{primary_focus}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with s3:
-        focus_area = "Move from queue to executive brief for the highest-priority campaign."
-        if action_count == 0:
-            focus_area = "Use the portfolio view to confirm there are no immediate intervention needs."
-        st.markdown(
-            f"""
-            <div class="summary-card">
-                <div class="summary-label">Recommended review path</div>
-                <div class="summary-value">{focus_area}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    st.divider()
-
-    st.subheader("Decision queue")
-    st.caption("A compact view of the highest-priority items, translated into business-facing review language.")
-    df_top = build_campaign_display_df(sort_campaigns_for_review(df_f).head(10))
-    st.dataframe(df_top, use_container_width=True, hide_index=True)
-
-    st.download_button(
-        "⬇️ Download CSV (Decision queue)",
-        data=df_top.to_csv(index=False).encode("utf-8"),
-        file_name="decision_queue.csv",
-        mime="text/csv",
-    )
-
-    st.divider()
+    st.caption("Use the queue and executive brief for decisions; use this view for portfolio-level pattern scanning.")
 
     st.subheader("📈 Performance map")
     st.caption(
@@ -1268,7 +1193,7 @@ with tab_details:
         default_campaign = campaign_options[0]
     idx = campaign_options.index(default_campaign)
 
-    selected_campaign = st.selectbox("Choose a campaign", options=campaign_options, index=idx)
+    selected_campaign = st.selectbox("Executive brief", options=campaign_options, index=idx)
     st.session_state["selected_campaign"] = selected_campaign
 
     row = df_run[df_run["campaign_id"] == selected_campaign].iloc[0]
@@ -1296,13 +1221,11 @@ with tab_details:
         ),
         unsafe_allow_html=True,
     )
-    st.write(
-        f"**Decision posture:** {_format_decision_label(row.get('stance'))} | **Priority:** {_format_risk_label(row.get('severity')).title()}"
-    )
 
     explanation = _clean_text(row.get("decision_explanation"))
+    explanation_human = _humanize_reason(explanation)
     if explanation:
-        st.write(f"**Why it matters:** {_humanize_reason(explanation)}")
+        st.write(f"**Why it matters:** {explanation_human}")
 
     primary_action = row.get("advisor_actions", [])
     if isinstance(primary_action, list) and primary_action:
@@ -1315,12 +1238,21 @@ with tab_details:
             st.write(f"- {bit}")
 
     reasons = row.get("reasons", [])
-    st.write("**Why this was flagged:**")
-    if isinstance(reasons, list) and reasons:
+    extra_reasons = []
+    if isinstance(reasons, list):
+        seen_reason = explanation_human.strip().lower() if explanation_human else ""
         for reason in reasons:
-            st.write(f"- {_humanize_reason(reason)}")
-    else:
-        st.write("- —")
+            clean_reason = _humanize_reason(reason)
+            if not clean_reason:
+                continue
+            if seen_reason and clean_reason.strip().lower() == seen_reason:
+                continue
+            extra_reasons.append(clean_reason)
+
+    if extra_reasons:
+        with st.expander("Additional supporting reasons", expanded=False):
+            for reason in extra_reasons:
+                st.write(f"- {reason}")
 
     warnings = row.get("warnings", [])
     if isinstance(warnings, list) and warnings:
@@ -1328,9 +1260,6 @@ with tab_details:
             for warning in warnings:
                 st.write(f"- {_humanize_reason(warning)}")
 
-    st.divider()
-
-    st.markdown("### Recommended next steps")
     advisor_summary = row.get("advisor_summary", pd.NA)
     advisor_actions = row.get("advisor_actions", [])
 
@@ -1344,75 +1273,72 @@ with tab_details:
         v = row.get(k, pd.NA)
         if pd.notna(v) and str(v).strip() and str(v).lower() != "nan":
             meta_bits.append(f"{meta_label_map[k]}={v}")
-    if meta_bits:
-        st.caption(" | ".join(meta_bits))
-
-    if pd.notna(advisor_summary) and str(advisor_summary).strip():
-        st.write(str(advisor_summary))
-    else:
-        st.caption("No additional advisory summary is available for this campaign.")
-
-    if isinstance(advisor_actions, list) and advisor_actions:
-        for i, a in enumerate(advisor_actions, 1):
-            st.write(f"{i}. {a}")
-    else:
-        st.caption("No recommended next steps are available for this campaign.")
-
-    if presentation_mode:
-        st.info(
-            "Demo cue: narrate the recommendation first, then the supporting evidence, then the illustrative scenarios."
-        )
+    remaining_actions = advisor_actions[1:] if isinstance(advisor_actions, list) and len(advisor_actions) > 1 else []
+    show_guidance = bool(meta_bits or (pd.notna(advisor_summary) and str(advisor_summary).strip()) or remaining_actions)
+    if show_guidance:
+        st.divider()
+        with st.expander("Additional guidance", expanded=False):
+            if meta_bits:
+                st.caption(" | ".join(meta_bits))
+            if pd.notna(advisor_summary) and str(advisor_summary).strip():
+                st.write(str(advisor_summary))
+            for i, a in enumerate(remaining_actions, start=2):
+                st.write(f"{i}. {a}")
 
     st.divider()
 
-    st.markdown("### Illustrative what-if scenarios")
-    st.caption(
-        "These scenarios are illustrative decision-support views based on simplified assumptions. They are directional, not predictive forecasts."
-    )
-    scenarios = row.get("scenarios", [])
-    df_whatif = scenarios_to_df(scenarios if isinstance(scenarios, list) else [])
-    if df_whatif.empty:
-        st.caption("No illustrative scenarios were stored for this campaign.")
-    else:
-        df_whatif_display = df_whatif.rename(
-            columns={
-                "scenario_name": "Scenario",
-                "budget_multiplier": "Budget change",
-                "projected_CPA": "Illustrative CPA",
-                "projected_ROAS": "Illustrative ROAS",
-                "notes": "Notes",
-            }
+    with st.expander("Illustrative what-if scenarios", expanded=False):
+        st.caption(
+            "These scenarios are illustrative decision-support views based on simplified assumptions. They are directional, not predictive forecasts."
         )
-        w1, w2 = st.columns(2)
-        fig_roas, fig_cpa = make_what_if_charts(df_whatif)
-        with w1:
-            st.plotly_chart(fig_roas, use_container_width=True)
-        with w2:
-            st.plotly_chart(fig_cpa, use_container_width=True)
-        st.dataframe(df_whatif_display, use_container_width=True, hide_index=True)
+        scenarios = row.get("scenarios", [])
+        df_whatif = scenarios_to_df(scenarios if isinstance(scenarios, list) else [])
+        if df_whatif.empty:
+            st.caption("No illustrative scenarios were stored for this campaign.")
+        else:
+            df_whatif_display = df_whatif.rename(
+                columns={
+                    "scenario_name": "Scenario",
+                    "budget_multiplier": "Budget change",
+                    "projected_CPA": "Illustrative CPA",
+                    "projected_ROAS": "Illustrative ROAS",
+                    "notes": "Notes",
+                }
+            )
+            w1, w2 = st.columns(2)
+            fig_roas, fig_cpa = make_what_if_charts(df_whatif)
+            with w1:
+                st.plotly_chart(fig_roas, use_container_width=True)
+            with w2:
+                st.plotly_chart(fig_cpa, use_container_width=True)
+            st.dataframe(df_whatif_display, use_container_width=True, hide_index=True)
 
-    st.divider()
-
-    st.markdown("### Additional context")
     analysis_sum = row.get("analysis_summary", pd.NA)
-    if pd.notna(analysis_sum) and str(analysis_sum).strip():
-        st.write(str(analysis_sum))
-
-    st.markdown("**Supporting insights**")
     ins = row.get("analysis_insights", [])
-    if isinstance(ins, list) and ins:
-        for it in ins:
-            st.write(f"- {_humanize_reason(it)}")
-    else:
-        st.write("- —")
-
-    st.markdown("**Additional suggested actions**")
     acts = row.get("analysis_suggested_actions", [])
-    if isinstance(acts, list) and acts:
-        for it in acts:
-            st.write(f"- {it}")
-    else:
-        st.write("- —")
+    has_context = bool(
+        (pd.notna(analysis_sum) and str(analysis_sum).strip())
+        or (isinstance(ins, list) and ins)
+        or (isinstance(acts, list) and acts)
+    )
+    if has_context:
+        with st.expander("Additional context", expanded=False):
+            if pd.notna(analysis_sum) and str(analysis_sum).strip():
+                st.write(str(analysis_sum))
+
+            st.markdown("**Supporting insights**")
+            if isinstance(ins, list) and ins:
+                for it in ins:
+                    st.write(f"- {_humanize_reason(it)}")
+            else:
+                st.write("- —")
+
+            st.markdown("**Additional suggested actions**")
+            if isinstance(acts, list) and acts:
+                for it in acts:
+                    st.write(f"- {it}")
+            else:
+                st.write("- —")
 
     provenance = row.get("provenance", {})
     execution_metadata = row.get("execution_metadata", {})
