@@ -1,5 +1,6 @@
 # dashboards/app.py
 import json
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -15,7 +16,7 @@ import streamlit as st
 # Page config
 # -----------------------------
 st.set_page_config(
-    page_title="Marketing Agent — Run Dashboard",
+    page_title="Marketing Decision Review",
     page_icon="📊",
     layout="wide",
 )
@@ -166,6 +167,104 @@ def _format_risk_label(value: Any) -> str:
     return sev.upper() if sev in {"high", "medium", "low"} else "UNKNOWN"
 
 
+def _format_decision_label(value: Any) -> str:
+    decision = _clean_text(value).lower()
+    mapping = {
+        "escalate": "Escalate",
+        "recommend": "Review",
+        "adjust": "Review",
+        "observe": "Monitor",
+    }
+    return mapping.get(decision, "Review")
+
+
+def _decision_css_class(value: Any) -> str:
+    decision = _clean_text(value).lower()
+    mapping = {
+        "escalate": "decision-escalate",
+        "recommend": "decision-review",
+        "adjust": "decision-review",
+        "observe": "decision-monitor",
+    }
+    return mapping.get(decision, "decision-review")
+
+
+def _priority_css_class(value: Any) -> str:
+    priority = _clean_text(value).lower()
+    mapping = {
+        "high": "priority-high",
+        "medium": "priority-medium",
+        "low": "priority-low",
+    }
+    return mapping.get(priority, "priority-neutral")
+
+
+def _badge_html(label: str, css_class: str) -> str:
+    return f'<span class="badge {css_class}">{label}</span>'
+
+
+def _humanize_reason(value: Any) -> str:
+    text = _clean_text(value)
+    if not text:
+        return ""
+
+    text = re.sub(r"^\[[^\]]+\]\s*", "", text)
+    text = text.replace(
+        "(supporting context; maturity gate keeps stance at observe)",
+        "(supporting context; early-campaign guardrail keeps this in monitor mode)",
+    )
+
+    replacements = {
+        "ROAS < 1.0": "ROAS below 1.0",
+        "pre-LTV": "before lifetime value assumptions",
+        "Campaign is immature": "Campaign is still early",
+        "maturity gate keeps stance at observe": "early-campaign guardrail keeps this in monitor mode",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+
+    return " ".join(text.split())
+
+
+def _key_evidence_line(row: pd.Series, max_items: int = 2) -> str:
+    bits = _build_evidence_bits(row)
+    if not bits:
+        return ""
+    return " | ".join(bits[:max_items])
+
+
+def _top_portfolio_issue(df: pd.DataFrame) -> str:
+    if df.empty:
+        return ""
+
+    reasons = (
+        df["decision_explanation"]
+        .dropna()
+        .astype("string")
+        .map(_humanize_reason)
+        .tolist()
+    )
+    for reason in reasons:
+        if reason:
+            return reason
+    return ""
+
+
+def _portfolio_signal_text(df: pd.DataFrame) -> str:
+    if df.empty:
+        return "No campaigns are currently visible in the review set."
+
+    campaigns_count = len(df)
+    action_count = int(df["stance"].isin(["escalate", "recommend", "adjust"]).sum())
+    high_count = int((df["severity"] == "high").sum())
+
+    if action_count == 0:
+        return f"All {campaigns_count} visible campaigns are in monitor mode."
+    if high_count > 0:
+        return f"{action_count} of {campaigns_count} campaigns need attention, including {high_count} high-priority item(s)."
+    return f"{action_count} of {campaigns_count} campaigns need review, with no high-priority escalations in the current filter set."
+
+
 def _build_evidence_bits(row: pd.Series) -> List[str]:
     bits: List[str] = []
 
@@ -216,7 +315,7 @@ def sort_campaigns_for_review(df: pd.DataFrame) -> pd.DataFrame:
 def build_campaign_display_df(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(
-            columns=["campaign_id", "stance", "risk", "explanation", "evidence", "warnings"]
+            columns=["Campaign", "Recommended review", "Priority", "Why it matters", "Key evidence", "Data notes"]
         )
 
     rows: List[Dict[str, Any]] = []
@@ -225,12 +324,12 @@ def build_campaign_display_df(df: pd.DataFrame) -> pd.DataFrame:
         warning_text = " | ".join(warnings[:2]) if isinstance(warnings, list) else ""
         rows.append(
             {
-                "campaign_id": row.get("campaign_id"),
-                "stance": _clean_text(row.get("stance")).upper() or "UNKNOWN",
-                "risk": _format_risk_label(row.get("severity")),
-                "explanation": _decision_explanation_from_row(row),
-                "evidence": " | ".join(_build_evidence_bits(row)),
-                "warnings": warning_text,
+                "Campaign": row.get("campaign_id"),
+                "Recommended review": _format_decision_label(row.get("stance")),
+                "Priority": _format_risk_label(row.get("severity")).title(),
+                "Why it matters": _humanize_reason(_decision_explanation_from_row(row)),
+                "Key evidence": _key_evidence_line(row),
+                "Data notes": _humanize_reason(warning_text),
             }
         )
     return pd.DataFrame(rows)
@@ -714,9 +813,9 @@ def make_scatter_ratio(df: pd.DataFrame) -> go.Figure:
     fig.update_layout(
         height=420,
         margin=dict(l=10, r=10, t=60, b=10),
-        legend_title_text="Severity",
-        xaxis_title="CPA / Target CPA (1.0 = on target)",
-        yaxis_title="ROAS (1.0 = break-even pre-LTV)",
+        legend_title_text="Priority",
+        xaxis_title="Efficiency vs target CPA (1.0 = on target)",
+        yaxis_title="ROAS (1.0 = break-even before lifetime value assumptions)",
     )
     return fig
 
@@ -749,8 +848,8 @@ def make_what_if_charts(df_whatif: pd.DataFrame) -> Tuple[go.Figure, go.Figure]:
     fig_roas.update_layout(
         height=260,
         margin=dict(l=10, r=10, t=30, b=10),
-        xaxis_title="Budget multiplier",
-        yaxis_title="Projected ROAS",
+        xaxis_title="Budget change multiplier",
+        yaxis_title="Illustrative ROAS",
     )
     fig_roas.add_hline(y=1.0, line_width=1, opacity=0.6)
 
@@ -758,8 +857,8 @@ def make_what_if_charts(df_whatif: pd.DataFrame) -> Tuple[go.Figure, go.Figure]:
     fig_cpa.update_layout(
         height=260,
         margin=dict(l=10, r=10, t=30, b=10),
-        xaxis_title="Budget multiplier",
-        yaxis_title="Projected CPA",
+        xaxis_title="Budget change multiplier",
+        yaxis_title="Illustrative CPA",
     )
     return fig_roas, fig_cpa
 
@@ -775,14 +874,97 @@ def diff_vs_previous(current: pd.Series, prev: pd.Series) -> Dict[str, float]:
 # -----------------------------
 # UI
 # -----------------------------
-st.title("📊 Marketing Agent — Run Dashboard")
+st.markdown(
+    """
+    <style>
+    .hero-card, .summary-card, .queue-card {
+        border: 1px solid rgba(128, 128, 128, 0.25);
+        border-radius: 12px;
+        padding: 0.9rem 1rem;
+        background: rgba(250, 250, 250, 0.02);
+        margin-bottom: 0.75rem;
+    }
+    .hero-eyebrow {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        opacity: 0.75;
+        margin-bottom: 0.4rem;
+    }
+    .hero-title {
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin-bottom: 0.35rem;
+    }
+    .hero-text, .summary-text, .queue-text {
+        font-size: 0.95rem;
+        line-height: 1.45;
+    }
+    .summary-label {
+        font-size: 0.76rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        opacity: 0.75;
+        margin-bottom: 0.35rem;
+    }
+    .summary-value {
+        font-size: 1rem;
+        font-weight: 600;
+        line-height: 1.35;
+    }
+    .badge {
+        display: inline-block;
+        padding: 0.18rem 0.55rem;
+        border-radius: 999px;
+        font-size: 0.76rem;
+        font-weight: 600;
+        margin-right: 0.4rem;
+        border: 1px solid transparent;
+    }
+    .decision-escalate, .priority-high {
+        background: rgba(220, 38, 38, 0.12);
+        color: #ffb4b4;
+        border-color: rgba(220, 38, 38, 0.35);
+    }
+    .decision-review, .priority-medium {
+        background: rgba(245, 158, 11, 0.12);
+        color: #ffd58a;
+        border-color: rgba(245, 158, 11, 0.35);
+    }
+    .decision-monitor, .priority-low {
+        background: rgba(34, 197, 94, 0.12);
+        color: #a7f3c1;
+        border-color: rgba(34, 197, 94, 0.35);
+    }
+    .priority-neutral {
+        background: rgba(148, 163, 184, 0.12);
+        color: #cbd5e1;
+        border-color: rgba(148, 163, 184, 0.35);
+    }
+    .compact-list {
+        margin: 0.25rem 0 0 0;
+        padding-left: 1.1rem;
+    }
+    .compact-list li {
+        margin-bottom: 0.25rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.title("📊 Marketing Decision Review")
+st.caption(
+    "Portfolio demo: a decision-support review surface that turns campaign diagnostics into prioritized business actions."
+)
 
 # Sidebar
-st.sidebar.header("⚙️ Controls")
-developer_mode = st.sidebar.toggle("Developer mode", value=False)
+st.sidebar.header("Review controls")
+developer_mode = st.sidebar.toggle("Show technical details", value=False)
+presentation_mode = st.sidebar.toggle("Presentation mode", value=True)
 
 if developer_mode:
-    with st.expander("Debug paths", expanded=False):
+    with st.expander("Technical paths", expanded=False):
         st.write(f"APP_DIR: {PATHS['APP_DIR']}")
         st.write(f"PROJECT_DIR: {PATHS['PROJECT_DIR']}")
         st.write(f"CWD: {PATHS['CWD']}")
@@ -799,9 +981,9 @@ db_runs_df = list_db_runs(db_path)
 runs_folder = list_runs_folder(runs_dir)
 local_csvs = list_local_csvs(data_dir)
 
-source_options = ["SQLite (agent_runs.db)", "Runs folder", "Local CSV in data/", "Upload CSV"]
+source_options = ["Saved run", "Run folder", "Local CSV", "Upload CSV"]
 default_index = 0 if not db_runs_df.empty else (1 if runs_folder else (2 if local_csvs else 3))
-source_mode = st.sidebar.radio("Data source", options=source_options, index=default_index)
+source_mode = st.sidebar.radio("Source data", options=source_options, index=default_index)
 
 uploaded = None
 if source_mode == "Upload CSV":
@@ -811,18 +993,18 @@ run_meta = ""
 df_run = None
 selected_run_id = None
 
-if source_mode == "SQLite (agent_runs.db)":
+if source_mode == "Saved run":
     if db_runs_df.empty:
-        st.warning(f"No runs found in DB: {db_path}")
+        st.warning(f"No saved runs found in: {db_path}")
         st.stop()
 
-    chosen_label = st.sidebar.selectbox("Select a DB run", options=db_runs_df["label"].tolist(), index=0)
+    chosen_label = st.sidebar.selectbox("Select a saved run", options=db_runs_df["label"].tolist(), index=0)
     selected_run_id = str(db_runs_df.loc[db_runs_df["label"] == chosen_label, "run_id"].iloc[0])
     df_run = load_db_run_outputs(db_path, selected_run_id)
     if df_run.empty:
-        st.warning(f"Run exists but no campaign outputs found for run_id={selected_run_id}")
+        st.warning(f"The saved run exists but has no campaign outputs for run_id={selected_run_id}")
         st.stop()
-    run_meta = f"DB run: {selected_run_id}  |  {chosen_label}"
+    run_meta = f"Saved run: {chosen_label}"
 
 elif source_mode == "Upload CSV":
     if uploaded is None:
@@ -831,7 +1013,7 @@ elif source_mode == "Upload CSV":
     df_run = normalize_df(pd.read_csv(uploaded))
     run_meta = f"Uploaded file: {uploaded.name}"
 
-elif source_mode == "Local CSV in data/":
+elif source_mode == "Local CSV":
     if not local_csvs:
         st.warning(f"No CSV files found in: {data_dir}")
         st.stop()
@@ -839,7 +1021,7 @@ elif source_mode == "Local CSV in data/":
     chosen_label = st.sidebar.selectbox("Select a local CSV", options=csv_labels, index=0)
     chosen_path = next(p for p in local_csvs if p.name == chosen_label)
     df_run = load_csv_path(chosen_path)
-    run_meta = f"Local CSV: {chosen_path}"
+    run_meta = f"Local file: {chosen_path.name}"
 
 else:  # Runs folder
     if not runs_folder:
@@ -847,9 +1029,9 @@ else:  # Runs folder
             f"No runs found in: {runs_dir}\n\n"
             "Fix options:\n"
             "1) Put runs under that folder (e.g. data/runs/<run_id>/campaigns.csv)\n"
-            "2) Use 'Local CSV in data/'\n"
+            "2) Use 'Local CSV'\n"
             "3) Upload a CSV\n"
-            "4) Prefer SQLite if available"
+            "4) Use 'Saved run' if available"
         )
         st.stop()
 
@@ -859,18 +1041,18 @@ else:  # Runs folder
     if df_run is None:
         st.error(f"Run found but no CSV inside: {run_dir}")
         st.stop()
-    run_meta = f"Run folder: {chosen_run} | dir={run_dir}"
+    run_meta = f"Run folder: {chosen_run}"
 
-st.caption(run_meta)
+st.caption("Reviewing: " + run_meta)
 
-if source_mode == "SQLite (agent_runs.db)" and not df_run.empty:
+if source_mode == "Saved run" and not df_run.empty:
     run_row = df_run.iloc[0]
     run_bits = []
     for label, key in [
         ("started", "run_started_at_utc"),
-        ("input", "run_input_csv"),
+        ("input file", "run_input_csv"),
         ("model", "run_model"),
-        ("used_llm", "run_used_llm"),
+        ("ai assist", "run_used_llm"),
     ]:
         value = _clean_text(run_row.get(key))
         if value:
@@ -879,7 +1061,7 @@ if source_mode == "SQLite (agent_runs.db)" and not df_run.empty:
     if notes_text:
         run_bits.append(f"notes={notes_text}")
     if run_bits:
-        st.caption("Run context: " + " | ".join(run_bits))
+        st.caption("Review context: " + " | ".join(run_bits))
 
 # Filters
 all_stances = sorted([s for s in df_run["stance"].dropna().unique() if str(s).strip()])
@@ -888,22 +1070,61 @@ all_severities = sorted(
     key=lambda x: -SEVERITY_ORDER.get(str(x), 0),
 )
 
-stance_filter = st.sidebar.multiselect("Filter stance", options=all_stances, default=[])
-severity_filter = st.sidebar.multiselect("Filter severity", options=all_severities, default=[])
-search_id = st.sidebar.text_input("Search campaign_id", value="")
+stance_filter = st.sidebar.multiselect("Filter recommendation", options=all_stances, default=[])
+severity_filter = st.sidebar.multiselect("Filter priority", options=all_severities, default=[])
+search_id = st.sidebar.text_input("Search campaign", value="")
 
 df_f = apply_filters(df_run, stance_filter, severity_filter, search_id)
 
+portfolio_signal = _portfolio_signal_text(df_f)
+top_issue = _top_portfolio_issue(sort_campaigns_for_review(df_f).head(5)) if not df_f.empty else ""
+action_count = int(df_f["stance"].isin(["escalate", "recommend", "adjust"]).sum()) if not df_f.empty else 0
+
+hero_left, hero_right = st.columns([2.5, 1.5])
+with hero_left:
+    st.markdown(
+        f"""
+        <div class="hero-card">
+            <div class="hero-eyebrow">Phase 1 portfolio artifact</div>
+            <div class="hero-title">Executive review surface for AI-assisted marketing decisions</div>
+            <div class="hero-text">{portfolio_signal}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with hero_right:
+    walkthrough_lines = [
+        "Start with the priority queue to see what needs action.",
+        "Open an executive brief to review rationale and next steps.",
+        "Use illustrative scenarios to support discussion, not prediction.",
+    ]
+    walkthrough_html = "".join(f"<li>{line}</li>" for line in walkthrough_lines)
+    st.markdown(
+        f"""
+        <div class="summary-card">
+            <div class="summary-label">Suggested demo walkthrough</div>
+            <div class="summary-text">
+                <ol class="compact-list">{walkthrough_html}</ol>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 # -----------------------------
-# NEW: Today’s Queue (top action list)
+# Priority review queue
 # -----------------------------
-st.subheader("✅ Today’s Queue (what to review first)")
-st.caption("This review list is ordered by persisted severity and stance, with explanations pulled from the stored agent output.")
+st.subheader("Priority review queue")
+st.caption("Start here: the queue below surfaces the campaigns most likely to need a decision or follow-up.")
 
 if df_f.empty:
     st.info("No campaigns match the current filters.")
 else:
     df_queue = sort_campaigns_for_review(df_f).head(5).copy()
+    summary_bits = [f"{action_count} campaign(s) currently need attention"]
+    if top_issue:
+        summary_bits.append(f"Top issue: {top_issue}")
+    st.write(" | ".join(summary_bits))
 
     # allow click-to-open via session_state
     if "selected_campaign" not in st.session_state:
@@ -915,30 +1136,36 @@ else:
         stance = str(r.get("stance", "—"))
         reason = _short_reason(r.get("decision_explanation"), max_len=150)
         advisor_actions = r.get("advisor_actions", [])
-        evidence = " | ".join(_build_evidence_bits(r))
+        decision_label = _format_decision_label(stance)
+        priority_label = _format_risk_label(sev).title()
+        reason = _humanize_reason(reason)
+        evidence = _key_evidence_line(r)
         warnings = r.get("warnings", [])
 
         with st.container(border=True):
-            top = st.columns([3, 1])
+            top = st.columns([4, 1])
             with top[0]:
+                st.markdown(f"**Campaign {cid}**")
                 st.markdown(
-                    f"**{cid}**  •  stance=`{stance}`  •  risk=`{_format_risk_label(sev)}`"
+                    _badge_html(decision_label, _decision_css_class(stance))
+                    + _badge_html(f"{priority_label} priority", _priority_css_class(sev)),
+                    unsafe_allow_html=True,
                 )
             with top[1]:
-                if st.button("Open", key=f"open_{cid}"):
+                if st.button("Open brief", key=f"open_{cid}"):
                     st.session_state["selected_campaign"] = cid
 
             if reason:
-                st.write(f"**Explanation:** {reason}")
+                st.write(reason)
             if evidence:
-                st.caption(evidence)
+                st.caption("Key evidence: " + evidence)
             if isinstance(advisor_actions, list) and advisor_actions:
-                st.write(f"**Recommended action:** {advisor_actions[0]}")
+                st.write(f"**Recommended next step:** {advisor_actions[0]}")
             if isinstance(warnings, list) and warnings:
-                st.warning("Warning: " + warnings[0])
+                st.caption("Data note: " + _humanize_reason(warnings[0]))
 
 # Tabs
-tab_overview, tab_details, tab_all = st.tabs(["📌 Overview", "🧠 Campaign details", "📋 All campaigns"])
+tab_overview, tab_details, tab_all = st.tabs(["📌 Portfolio overview", "🧠 Executive brief", "📋 Campaign table"])
 
 # -----------------------------
 # Overview (simplified & clearer)
@@ -953,16 +1180,59 @@ with tab_overview:
     roas_lt_1 = int((df_f["roas"] < 1.0).sum())
     avg_cpa_ratio = float(np.nanmean(df_f["cpa_ratio"])) if campaigns_count else np.nan
 
-    k1.metric("Campaigns", f"{campaigns_count}")
-    k2.metric("Escalate", f"{escalate_count}")
-    k3.metric("High severity", f"{high_count}")
-    k4.metric("ROAS < 1.0", f"{roas_lt_1}")
-    k5.metric("Avg CPA/Target", f"{avg_cpa_ratio:.2f}" if campaigns_count else "—")
+    k1.metric("Campaigns in review", f"{campaigns_count}")
+    k2.metric("Escalate now", f"{escalate_count}")
+    k3.metric("High priority", f"{high_count}")
+    k4.metric("Below break-even", f"{roas_lt_1}")
+    k5.metric("Avg efficiency vs target", f"{avg_cpa_ratio:.2f}" if campaigns_count else "—")
+
+    if campaigns_count:
+        st.caption(
+            f"{action_count} of {campaigns_count} campaigns need attention across the current filter set."
+        )
+
+    st.divider()
+
+    s1, s2, s3 = st.columns(3)
+    with s1:
+        st.markdown(
+            f"""
+            <div class="summary-card">
+                <div class="summary-label">Portfolio signal</div>
+                <div class="summary-value">{portfolio_signal}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with s2:
+        primary_focus = top_issue or "No major issue is currently surfaced."
+        st.markdown(
+            f"""
+            <div class="summary-card">
+                <div class="summary-label">Primary focus</div>
+                <div class="summary-value">{primary_focus}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with s3:
+        focus_area = "Move from queue to executive brief for the highest-priority campaign."
+        if action_count == 0:
+            focus_area = "Use the portfolio view to confirm there are no immediate intervention needs."
+        st.markdown(
+            f"""
+            <div class="summary-card">
+                <div class="summary-label">Recommended review path</div>
+                <div class="summary-value">{focus_area}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     st.divider()
 
     st.subheader("Decision queue")
-    st.caption("Ordered by persisted severity and stance, with agent explanations and supporting evidence.")
+    st.caption("A compact view of the highest-priority items, translated into business-facing review language.")
     df_top = build_campaign_display_df(sort_campaigns_for_review(df_f).head(10))
     st.dataframe(df_top, use_container_width=True, hide_index=True)
 
@@ -975,8 +1245,10 @@ with tab_overview:
 
     st.divider()
 
-    st.subheader("📈 Efficiency vs Profitability")
-    st.caption("Right of 1.0 = CPA above target. Below 1.0 = ROAS under 1.0. Color reflects persisted risk severity.")
+    st.subheader("📈 Performance map")
+    st.caption(
+        "Right of 1.0 signals cost above target. Below 1.0 on the y-axis signals sub-break-even ROAS. Color shows priority."
+    )
 
     fig = make_scatter_ratio(df_f)
     st.plotly_chart(fig, use_container_width=True)
@@ -996,31 +1268,45 @@ with tab_details:
         default_campaign = campaign_options[0]
     idx = campaign_options.index(default_campaign)
 
-    selected_campaign = st.selectbox("Select a campaign", options=campaign_options, index=idx)
+    selected_campaign = st.selectbox("Choose a campaign", options=campaign_options, index=idx)
     st.session_state["selected_campaign"] = selected_campaign
 
     row = df_run[df_run["campaign_id"] == selected_campaign].iloc[0]
 
-    st.subheader(f"Details: {selected_campaign}")
+    st.subheader(f"Executive brief: {selected_campaign}")
     d1, d2, d3, d4, d5 = st.columns(5)
 
     stance_val = row.get("stance")
     severity_val = row.get("severity")
 
-    d1.metric("Stance", "—" if pd.isna(stance_val) else str(stance_val))
-    d2.metric("Severity", "—" if pd.isna(severity_val) else str(severity_val))
+    d1.metric("Recommended review", _format_decision_label(stance_val))
+    d2.metric("Priority", _format_risk_label(severity_val).title())
     d3.metric("CPA", f"{row['cpa']:.2f}" if pd.notna(row.get("cpa")) else "—")
     d4.metric("Target CPA", f"{row['target_cpa']:.2f}" if pd.notna(row.get("target_cpa")) else "—")
-    d5.metric("CPA/Target", f"{row['cpa_ratio']:.2f}" if pd.notna(row.get("cpa_ratio")) else "—")
+    d5.metric("Efficiency vs target", f"{row['cpa_ratio']:.2f}" if pd.notna(row.get("cpa_ratio")) else "—")
 
     st.divider()
 
-    st.markdown("### Decision")
-    st.write(f"**Risk:** {_format_risk_label(row.get('severity'))}")
+    st.markdown("### Recommendation summary")
+    st.markdown(
+        _badge_html(_format_decision_label(row.get("stance")), _decision_css_class(row.get("stance")))
+        + _badge_html(
+            f"{_format_risk_label(row.get('severity')).title()} priority",
+            _priority_css_class(row.get("severity")),
+        ),
+        unsafe_allow_html=True,
+    )
+    st.write(
+        f"**Decision posture:** {_format_decision_label(row.get('stance'))} | **Priority:** {_format_risk_label(row.get('severity')).title()}"
+    )
 
     explanation = _clean_text(row.get("decision_explanation"))
     if explanation:
-        st.write(f"**Short explanation:** {explanation}")
+        st.write(f"**Why it matters:** {_humanize_reason(explanation)}")
+
+    primary_action = row.get("advisor_actions", [])
+    if isinstance(primary_action, list) and primary_action:
+        st.write(f"**Recommended next step:** {primary_action[0]}")
 
     evidence_bits = _build_evidence_bits(row)
     if evidence_bits:
@@ -1029,77 +1315,98 @@ with tab_details:
             st.write(f"- {bit}")
 
     reasons = row.get("reasons", [])
-    st.write("**Persisted reasons:**")
+    st.write("**Why this was flagged:**")
     if isinstance(reasons, list) and reasons:
         for reason in reasons:
-            st.write(f"- {reason}")
+            st.write(f"- {_humanize_reason(reason)}")
     else:
         st.write("- —")
 
     warnings = row.get("warnings", [])
     if isinstance(warnings, list) and warnings:
-        st.write("**Warnings / data quality notes:**")
-        for warning in warnings:
-            st.write(f"- {warning}")
+        with st.expander("Data notes", expanded=False):
+            for warning in warnings:
+                st.write(f"- {_humanize_reason(warning)}")
 
-    # Advisor
-    st.markdown("### Advisor")
+    st.divider()
+
+    st.markdown("### Recommended next steps")
     advisor_summary = row.get("advisor_summary", pd.NA)
     advisor_actions = row.get("advisor_actions", [])
 
     meta_bits = []
+    meta_label_map = {
+        "advisor_confidence": "confidence",
+        "advisor_used_llm": "uses llm",
+        "advisor_model": "model",
+    }
     for k in ["advisor_confidence", "advisor_used_llm", "advisor_model"]:
         v = row.get(k, pd.NA)
         if pd.notna(v) and str(v).strip() and str(v).lower() != "nan":
-            meta_bits.append(f"{k.replace('advisor_','')}={v}")
+            meta_bits.append(f"{meta_label_map[k]}={v}")
     if meta_bits:
         st.caption(" | ".join(meta_bits))
 
     if pd.notna(advisor_summary) and str(advisor_summary).strip():
         st.write(str(advisor_summary))
     else:
-        st.caption("No advisor summary was stored for this campaign.")
+        st.caption("No additional advisory summary is available for this campaign.")
 
     if isinstance(advisor_actions, list) and advisor_actions:
         for i, a in enumerate(advisor_actions, 1):
             st.write(f"{i}. {a}")
     else:
-        st.caption("No advisor actions were stored for this campaign.")
+        st.caption("No recommended next steps are available for this campaign.")
+
+    if presentation_mode:
+        st.info(
+            "Demo cue: narrate the recommendation first, then the supporting evidence, then the illustrative scenarios."
+        )
 
     st.divider()
 
-    # What-if (simulation)
-    st.markdown("### 🧪 What-if scenarios (simulation)")
+    st.markdown("### Illustrative what-if scenarios")
+    st.caption(
+        "These scenarios are illustrative decision-support views based on simplified assumptions. They are directional, not predictive forecasts."
+    )
     scenarios = row.get("scenarios", [])
     df_whatif = scenarios_to_df(scenarios if isinstance(scenarios, list) else [])
     if df_whatif.empty:
-        st.caption("No scenarios found in this run.")
+        st.caption("No illustrative scenarios were stored for this campaign.")
     else:
+        df_whatif_display = df_whatif.rename(
+            columns={
+                "scenario_name": "Scenario",
+                "budget_multiplier": "Budget change",
+                "projected_CPA": "Illustrative CPA",
+                "projected_ROAS": "Illustrative ROAS",
+                "notes": "Notes",
+            }
+        )
         w1, w2 = st.columns(2)
         fig_roas, fig_cpa = make_what_if_charts(df_whatif)
         with w1:
             st.plotly_chart(fig_roas, use_container_width=True)
         with w2:
             st.plotly_chart(fig_cpa, use_container_width=True)
-        st.dataframe(df_whatif, use_container_width=True, hide_index=True)
+        st.dataframe(df_whatif_display, use_container_width=True, hide_index=True)
 
     st.divider()
 
-    # Analysis
-    st.markdown("### Analysis")
+    st.markdown("### Additional context")
     analysis_sum = row.get("analysis_summary", pd.NA)
     if pd.notna(analysis_sum) and str(analysis_sum).strip():
         st.write(str(analysis_sum))
 
-    st.markdown("**Insights**")
+    st.markdown("**Supporting insights**")
     ins = row.get("analysis_insights", [])
     if isinstance(ins, list) and ins:
         for it in ins:
-            st.write(f"- {it}")
+            st.write(f"- {_humanize_reason(it)}")
     else:
         st.write("- —")
 
-    st.markdown("**Suggested actions (analysis)**")
+    st.markdown("**Additional suggested actions**")
     acts = row.get("analysis_suggested_actions", [])
     if isinstance(acts, list) and acts:
         for it in acts:
@@ -1113,7 +1420,7 @@ with tab_details:
         with st.expander("Metric provenance", expanded=False):
             st.json(provenance)
     if isinstance(execution_metadata, dict) and execution_metadata:
-        with st.expander("Execution metadata", expanded=False):
+        with st.expander("Technical metadata", expanded=False):
             st.json(execution_metadata)
 
     if developer_mode:
@@ -1124,7 +1431,7 @@ with tab_details:
 # All campaigns
 # -----------------------------
 with tab_all:
-    st.subheader("All campaigns (filtered)")
+    st.subheader("Campaign table")
     df_all = build_campaign_display_df(df_f)
     st.dataframe(df_all, use_container_width=True, hide_index=True)
     st.download_button(
