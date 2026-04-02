@@ -948,6 +948,17 @@ st.markdown(
     .compact-list li {
         margin-bottom: 0.25rem;
     }
+    .queue-header {
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        opacity: 0.7;
+        margin-bottom: 0.15rem;
+    }
+    .queue-row {
+        padding: 0.45rem 0;
+        border-bottom: 1px solid rgba(128, 128, 128, 0.18);
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -1078,140 +1089,145 @@ df_f = apply_filters(df_run, stance_filter, severity_filter, search_id)
 portfolio_signal = _portfolio_signal_text(df_f)
 top_issue = _top_portfolio_issue(sort_campaigns_for_review(df_f).head(5)) if not df_f.empty else ""
 action_count = int(df_f["stance"].isin(["escalate", "recommend", "adjust"]).sum()) if not df_f.empty else 0
-next_step_text = "Open an executive brief from the queue below to review the core recommendation."
-if action_count == 0:
-    next_step_text = "Start with the executive brief below to confirm the portfolio is currently in monitor mode."
+campaigns_count = len(df_f)
+high_count = int((df_f["severity"] == "high").sum()) if campaigns_count else 0
+escalate_count = int((df_f["stance"] == "escalate").sum()) if campaigns_count else 0
+roas_lt_1 = int((df_f["roas"] < 1.0).sum()) if campaigns_count else 0
+avg_cpa_ratio = float(np.nanmean(df_f["cpa_ratio"])) if campaigns_count else np.nan
+sorted_df = sort_campaigns_for_review(df_f) if not df_f.empty else df_f.copy()
+campaign_options = sorted_df["campaign_id"].tolist() if not sorted_df.empty else []
+if campaign_options:
+    default_campaign = st.session_state.get("selected_campaign", campaign_options[0])
+    if default_campaign not in campaign_options:
+        default_campaign = campaign_options[0]
+    st.session_state["selected_campaign"] = default_campaign
+    top_row = sorted_df.iloc[0]
+    top_campaign = str(top_row.get("campaign_id"))
+    top_action = _format_decision_label(top_row.get("stance"))
+    top_priority = _format_risk_label(top_row.get("severity")).title()
+    top_reason = _humanize_reason(_short_reason(top_row.get("decision_explanation"), max_len=110))
+else:
+    top_campaign = "None selected"
+    top_action = "Monitor"
+    top_priority = "Low"
+    top_reason = "No campaigns match the current filters."
 
-st.markdown(
-    f"""
-    <div class="hero-card">
-        <div class="hero-eyebrow">Phase 1 portfolio artifact</div>
-        <div class="hero-title">Executive review surface for AI-assisted marketing decisions</div>
-        <div class="hero-text">{portfolio_signal}</div>
-        <div class="hero-text"><strong>Next step:</strong> {next_step_text}</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+hero1, hero2, hero3 = st.columns([2.2, 1.8, 2.2])
+with hero1:
+    st.markdown(
+        """
+        <div class="summary-card">
+            <div class="summary-label">What this does</div>
+            <div class="summary-value">Turns campaign diagnostics into a prioritized review queue and a single executive brief.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with hero2:
+    st.markdown(
+        f"""
+        <div class="summary-card">
+            <div class="summary-label">Top campaign</div>
+            <div class="summary-value">{top_campaign}</div>
+            <div class="summary-text">{top_action} | {top_priority} priority</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with hero3:
+    st.markdown(
+        f"""
+        <div class="summary-card">
+            <div class="summary-label">Why it needs attention</div>
+            <div class="summary-value">{top_reason}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 # -----------------------------
 # Priority review queue
 # -----------------------------
-st.subheader("Priority review queue")
-st.caption("Start here: the queue below surfaces the campaigns most likely to need a decision or follow-up.")
+st.subheader("Decision queue")
+st.caption("Review the top rows, then open the executive brief directly below.")
 
 if df_f.empty:
     st.info("No campaigns match the current filters.")
 else:
-    df_queue = sort_campaigns_for_review(df_f).head(4).copy()
+    df_queue = sorted_df.head(8).copy()
     summary_bits = [f"{action_count} campaign(s) currently need attention"]
     if top_issue:
         summary_bits.append(f"Top issue: {top_issue}")
     st.write(" | ".join(summary_bits))
-
-    # allow click-to-open via session_state
-    if "selected_campaign" not in st.session_state:
-        st.session_state["selected_campaign"] = df_queue["campaign_id"].iloc[0]
+    header_cols = st.columns([2.2, 1.6, 4.0, 2.4, 1.2])
+    headers = ["Campaign", "Review", "Why it matters", "Evidence", ""]
+    for col, header in zip(header_cols, headers):
+        with col:
+            if header:
+                st.markdown(f"<div class='queue-header'>{header}</div>", unsafe_allow_html=True)
 
     for _, r in df_queue.iterrows():
-        cid = str(r["campaign_id"])
+        cid = str(r.get("campaign_id"))
         sev = str(r.get("severity", "—"))
         stance = str(r.get("stance", "—"))
-        reason = _short_reason(r.get("decision_explanation"), max_len=110)
         decision_label = _format_decision_label(stance)
         priority_label = _format_risk_label(sev).title()
-        reason = _humanize_reason(reason)
+        reason = _humanize_reason(_short_reason(r.get("decision_explanation"), max_len=95))
         evidence = _key_evidence_line(r, max_items=1)
+        row_cols = st.columns([2.2, 1.6, 4.0, 2.4, 1.2])
+        with row_cols[0]:
+            st.markdown(f"<div class='queue-row'><strong>{cid}</strong></div>", unsafe_allow_html=True)
+        with row_cols[1]:
+            st.markdown(
+                f"<div class='queue-row'>{_badge_html(decision_label, _decision_css_class(stance))}{_badge_html(priority_label, _priority_css_class(sev))}</div>",
+                unsafe_allow_html=True,
+            )
+        with row_cols[2]:
+            st.markdown(f"<div class='queue-row'>{reason or 'No summary available.'}</div>", unsafe_allow_html=True)
+        with row_cols[3]:
+            st.markdown(
+                f"<div class='queue-row'><span class='summary-text'>{evidence or 'No evidence summary available.'}</span></div>",
+                unsafe_allow_html=True,
+            )
+        with row_cols[4]:
+            if st.button("Open brief", key=f"open_{cid}"):
+                st.session_state["selected_campaign"] = cid
 
-        with st.container(border=True):
-            row_cols = st.columns([2.6, 4.4, 2.4, 1.2])
-            with row_cols[0]:
-                st.markdown(f"**Campaign {cid}**")
-                st.markdown(
-                    _badge_html(decision_label, _decision_css_class(stance))
-                    + _badge_html(f"{priority_label} priority", _priority_css_class(sev)),
-                    unsafe_allow_html=True,
-                )
-            with row_cols[1]:
-                st.markdown(reason or "No summary available.")
-            with row_cols[2]:
-                st.caption(evidence or "No evidence summary available.")
-            with row_cols[3]:
-                if st.button("Open executive brief", key=f"open_{cid}"):
-                    st.session_state["selected_campaign"] = cid
+if df_f.empty:
+    st.stop()
 
-# Tabs
-tab_details, tab_overview, tab_all = st.tabs(["🧠 Executive brief", "📌 Portfolio overview", "📋 Campaign table"])
-
-# -----------------------------
-# Overview (simplified & clearer)
-# -----------------------------
-with tab_overview:
-    st.subheader("At a glance")
-    k1, k2, k3, k4, k5 = st.columns(5)
-
-    campaigns_count = len(df_f)
-    high_count = int((df_f["severity"] == "high").sum())
-    escalate_count = int((df_f["stance"] == "escalate").sum())
-    roas_lt_1 = int((df_f["roas"] < 1.0).sum())
-    avg_cpa_ratio = float(np.nanmean(df_f["cpa_ratio"])) if campaigns_count else np.nan
-
-    k1.metric("Campaigns in review", f"{campaigns_count}")
-    k2.metric("Escalate now", f"{escalate_count}")
-    k3.metric("High priority", f"{high_count}")
-    k4.metric("Below break-even", f"{roas_lt_1}")
-    k5.metric("Avg efficiency vs target", f"{avg_cpa_ratio:.2f}" if campaigns_count else "—")
-
-    if campaigns_count:
-        st.caption(
-            f"{action_count} of {campaigns_count} campaigns need attention across the current filter set."
-        )
-
-    st.divider()
-    st.caption("Use the queue and executive brief for decisions; use this view for portfolio-level pattern scanning.")
-
-    st.subheader("📈 Performance map")
-    st.caption(
-        "Right of 1.0 signals cost above target. Below 1.0 on the y-axis signals sub-break-even ROAS. Color shows priority."
-    )
-
-    fig = make_scatter_ratio(df_f)
-    st.plotly_chart(fig, use_container_width=True)
-
-# -----------------------------
-# Campaign details
-# -----------------------------
-with tab_details:
-    if df_f.empty:
-        st.warning("No campaigns match your filters.")
-        st.stop()
-
-    # Use the queue-selected campaign by default
-    default_campaign = st.session_state.get("selected_campaign", df_f["campaign_id"].iloc[0])
-    campaign_options = sort_campaigns_for_review(df_f)["campaign_id"].tolist()
-    if default_campaign not in campaign_options:
-        default_campaign = campaign_options[0]
-    idx = campaign_options.index(default_campaign)
-
-    selected_campaign = st.selectbox("Executive brief", options=campaign_options, index=idx)
+selected_campaign = st.session_state["selected_campaign"]
+if selected_campaign not in campaign_options:
+    selected_campaign = campaign_options[0]
     st.session_state["selected_campaign"] = selected_campaign
 
+row = df_run[df_run["campaign_id"] == selected_campaign].iloc[0]
+
+st.divider()
+brief_top_left, brief_top_right = st.columns([3.5, 1.7])
+with brief_top_left:
+    st.subheader(f"Executive brief: {selected_campaign}")
+with brief_top_right:
+    idx = campaign_options.index(selected_campaign)
+    selected_campaign = st.selectbox("Focused campaign", options=campaign_options, index=idx, label_visibility="collapsed")
+    st.session_state["selected_campaign"] = selected_campaign
     row = df_run[df_run["campaign_id"] == selected_campaign].iloc[0]
 
-    st.subheader(f"Executive brief: {selected_campaign}")
-    d1, d2, d3, d4, d5 = st.columns(5)
+d1, d2, d3, d4, d5 = st.columns(5)
 
-    stance_val = row.get("stance")
-    severity_val = row.get("severity")
+stance_val = row.get("stance")
+severity_val = row.get("severity")
 
-    d1.metric("Recommended review", _format_decision_label(stance_val))
-    d2.metric("Priority", _format_risk_label(severity_val).title())
-    d3.metric("CPA", f"{row['cpa']:.2f}" if pd.notna(row.get("cpa")) else "—")
-    d4.metric("Target CPA", f"{row['target_cpa']:.2f}" if pd.notna(row.get("target_cpa")) else "—")
-    d5.metric("Efficiency vs target", f"{row['cpa_ratio']:.2f}" if pd.notna(row.get("cpa_ratio")) else "—")
+d1.metric("Recommended review", _format_decision_label(stance_val))
+d2.metric("Priority", _format_risk_label(severity_val).title())
+d3.metric("CPA", f"{row['cpa']:.2f}" if pd.notna(row.get("cpa")) else "—")
+d4.metric("Target CPA", f"{row['target_cpa']:.2f}" if pd.notna(row.get("target_cpa")) else "—")
+d5.metric("Efficiency vs target", f"{row['cpa_ratio']:.2f}" if pd.notna(row.get("cpa_ratio")) else "—")
 
-    st.divider()
+st.divider()
 
+primary_left, primary_right = st.columns([3.2, 2.1])
+with primary_left:
     st.markdown("### Recommendation summary")
     st.markdown(
         _badge_html(_format_decision_label(row.get("stance")), _decision_css_class(row.get("stance")))
@@ -1234,130 +1250,135 @@ with tab_details:
     evidence_bits = _build_evidence_bits(row)
     if evidence_bits:
         st.write("**Supporting evidence:**")
-        for bit in evidence_bits:
+        for bit in evidence_bits[:4]:
             st.write(f"- {bit}")
-
-    reasons = row.get("reasons", [])
-    extra_reasons = []
-    if isinstance(reasons, list):
-        seen_reason = explanation_human.strip().lower() if explanation_human else ""
-        for reason in reasons:
-            clean_reason = _humanize_reason(reason)
-            if not clean_reason:
-                continue
-            if seen_reason and clean_reason.strip().lower() == seen_reason:
-                continue
-            extra_reasons.append(clean_reason)
-
-    if extra_reasons:
-        with st.expander("Additional supporting reasons", expanded=False):
-            for reason in extra_reasons:
-                st.write(f"- {reason}")
-
-    warnings = row.get("warnings", [])
-    if isinstance(warnings, list) and warnings:
-        with st.expander("Data notes", expanded=False):
-            for warning in warnings:
-                st.write(f"- {_humanize_reason(warning)}")
-
-    advisor_summary = row.get("advisor_summary", pd.NA)
+with primary_right:
+    st.markdown("### What to do next")
     advisor_actions = row.get("advisor_actions", [])
+    if isinstance(advisor_actions, list) and advisor_actions:
+        for i, a in enumerate(advisor_actions[:3], 1):
+            st.write(f"{i}. {a}")
+    else:
+        st.write("No recommended next steps are available for this campaign.")
 
-    meta_bits = []
-    meta_label_map = {
-        "advisor_confidence": "confidence",
-        "advisor_used_llm": "uses llm",
-        "advisor_model": "model",
-    }
-    for k in ["advisor_confidence", "advisor_used_llm", "advisor_model"]:
-        v = row.get(k, pd.NA)
-        if pd.notna(v) and str(v).strip() and str(v).lower() != "nan":
-            meta_bits.append(f"{meta_label_map[k]}={v}")
-    remaining_actions = advisor_actions[1:] if isinstance(advisor_actions, list) and len(advisor_actions) > 1 else []
-    show_guidance = bool(meta_bits or (pd.notna(advisor_summary) and str(advisor_summary).strip()) or remaining_actions)
-    if show_guidance:
-        st.divider()
-        with st.expander("Additional guidance", expanded=False):
-            if meta_bits:
-                st.caption(" | ".join(meta_bits))
-            if pd.notna(advisor_summary) and str(advisor_summary).strip():
-                st.write(str(advisor_summary))
-            for i, a in enumerate(remaining_actions, start=2):
-                st.write(f"{i}. {a}")
+reasons = row.get("reasons", [])
+extra_reasons = []
+if isinstance(reasons, list):
+    seen_reason = explanation_human.strip().lower() if explanation_human else ""
+    for reason in reasons:
+        clean_reason = _humanize_reason(reason)
+        if not clean_reason:
+            continue
+        if seen_reason and clean_reason.strip().lower() == seen_reason:
+            continue
+        extra_reasons.append(clean_reason)
 
-    st.divider()
+warnings = row.get("warnings", [])
+advisor_summary = row.get("advisor_summary", pd.NA)
+meta_bits = []
+meta_label_map = {
+    "advisor_confidence": "confidence",
+    "advisor_used_llm": "uses llm",
+    "advisor_model": "model",
+}
+for k in ["advisor_confidence", "advisor_used_llm", "advisor_model"]:
+    v = row.get(k, pd.NA)
+    if pd.notna(v) and str(v).strip() and str(v).lower() != "nan":
+        meta_bits.append(f"{meta_label_map[k]}={v}")
 
-    with st.expander("Illustrative what-if scenarios", expanded=False):
-        st.caption(
-            "These scenarios are illustrative decision-support views based on simplified assumptions. They are directional, not predictive forecasts."
-        )
-        scenarios = row.get("scenarios", [])
-        df_whatif = scenarios_to_df(scenarios if isinstance(scenarios, list) else [])
-        if df_whatif.empty:
-            st.caption("No illustrative scenarios were stored for this campaign.")
-        else:
-            df_whatif_display = df_whatif.rename(
-                columns={
-                    "scenario_name": "Scenario",
-                    "budget_multiplier": "Budget change",
-                    "projected_CPA": "Illustrative CPA",
-                    "projected_ROAS": "Illustrative ROAS",
-                    "notes": "Notes",
-                }
-            )
-            w1, w2 = st.columns(2)
-            fig_roas, fig_cpa = make_what_if_charts(df_whatif)
-            with w1:
-                st.plotly_chart(fig_roas, use_container_width=True)
-            with w2:
-                st.plotly_chart(fig_cpa, use_container_width=True)
-            st.dataframe(df_whatif_display, use_container_width=True, hide_index=True)
-
-    analysis_sum = row.get("analysis_summary", pd.NA)
-    ins = row.get("analysis_insights", [])
-    acts = row.get("analysis_suggested_actions", [])
-    has_context = bool(
-        (pd.notna(analysis_sum) and str(analysis_sum).strip())
-        or (isinstance(ins, list) and ins)
-        or (isinstance(acts, list) and acts)
+st.divider()
+support_left, support_right = st.columns([2.3, 1.7])
+with support_left:
+    st.markdown("### Illustrative what-if scenarios")
+    st.caption(
+        "These scenarios are illustrative decision-support views based on simplified assumptions. They are directional, not predictive forecasts."
     )
-    if has_context:
-        with st.expander("Additional context", expanded=False):
-            if pd.notna(analysis_sum) and str(analysis_sum).strip():
-                st.write(str(analysis_sum))
+    scenarios = row.get("scenarios", [])
+    df_whatif = scenarios_to_df(scenarios if isinstance(scenarios, list) else [])
+    if df_whatif.empty:
+        st.caption("No illustrative scenarios were stored for this campaign.")
+    else:
+        df_whatif_display = df_whatif.rename(
+            columns={
+                "scenario_name": "Scenario",
+                "budget_multiplier": "Budget change",
+                "projected_CPA": "Illustrative CPA",
+                "projected_ROAS": "Illustrative ROAS",
+                "notes": "Notes",
+            }
+        )
+        w1, w2 = st.columns(2)
+        fig_roas, fig_cpa = make_what_if_charts(df_whatif)
+        with w1:
+            st.plotly_chart(fig_roas, use_container_width=True)
+        with w2:
+            st.plotly_chart(fig_cpa, use_container_width=True)
+        st.dataframe(df_whatif_display, use_container_width=True, hide_index=True)
+with support_right:
+    has_support = bool(extra_reasons or warnings or meta_bits or (pd.notna(advisor_summary) and str(advisor_summary).strip()))
+    if has_support:
+        st.markdown("### Supporting notes")
+        if extra_reasons:
+            st.markdown("**Additional reasons**")
+            for reason in extra_reasons[:3]:
+                st.write(f"- {reason}")
+        if isinstance(warnings, list) and warnings:
+            st.markdown("**Data notes**")
+            for warning in warnings[:3]:
+                st.write(f"- {_humanize_reason(warning)}")
+        if pd.notna(advisor_summary) and str(advisor_summary).strip():
+            st.markdown("**Advisor summary**")
+            st.write(str(advisor_summary))
+        if meta_bits:
+            st.caption(" | ".join(meta_bits))
 
+analysis_sum = row.get("analysis_summary", pd.NA)
+ins = row.get("analysis_insights", [])
+acts = row.get("analysis_suggested_actions", [])
+has_context = bool(
+    (pd.notna(analysis_sum) and str(analysis_sum).strip())
+    or (isinstance(ins, list) and ins)
+    or (isinstance(acts, list) and acts)
+)
+if has_context or developer_mode:
+    with st.expander("Reference details", expanded=False):
+        if pd.notna(analysis_sum) and str(analysis_sum).strip():
+            st.write(str(analysis_sum))
+
+        if isinstance(ins, list) and ins:
             st.markdown("**Supporting insights**")
-            if isinstance(ins, list) and ins:
-                for it in ins:
-                    st.write(f"- {_humanize_reason(it)}")
-            else:
-                st.write("- —")
+            for it in ins:
+                st.write(f"- {_humanize_reason(it)}")
 
+        if isinstance(acts, list) and acts:
             st.markdown("**Additional suggested actions**")
-            if isinstance(acts, list) and acts:
-                for it in acts:
-                    st.write(f"- {it}")
-            else:
-                st.write("- —")
+            for it in acts:
+                st.write(f"- {it}")
 
-    provenance = row.get("provenance", {})
-    execution_metadata = row.get("execution_metadata", {})
-    if isinstance(provenance, dict) and provenance:
-        with st.expander("Metric provenance", expanded=False):
+        provenance = row.get("provenance", {})
+        execution_metadata = row.get("execution_metadata", {})
+        if isinstance(provenance, dict) and provenance:
+            st.markdown("**Metric provenance**")
             st.json(provenance)
-    if isinstance(execution_metadata, dict) and execution_metadata:
-        with st.expander("Technical metadata", expanded=False):
+        if isinstance(execution_metadata, dict) and execution_metadata:
+            st.markdown("**Technical metadata**")
             st.json(execution_metadata)
-
-    if developer_mode:
-        with st.expander("Raw row JSON", expanded=False):
+        if developer_mode:
+            st.markdown("**Raw row JSON**")
             st.code(json.dumps(row.to_dict(), indent=2, default=str), language="json")
 
-# -----------------------------
-# All campaigns
-# -----------------------------
-with tab_all:
-    st.subheader("Campaign table")
+with st.expander("Portfolio overview", expanded=False):
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("Campaigns in review", f"{campaigns_count}")
+    k2.metric("Escalate now", f"{escalate_count}")
+    k3.metric("High priority", f"{high_count}")
+    k4.metric("Below break-even", f"{roas_lt_1}")
+    k5.metric("Avg efficiency vs target", f"{avg_cpa_ratio:.2f}" if campaigns_count else "—")
+    st.caption("Use this section for portfolio-level pattern scanning, not primary decision review.")
+    fig = make_scatter_ratio(df_f)
+    st.plotly_chart(fig, use_container_width=True)
+
+with st.expander("Campaign table", expanded=False):
     df_all = build_campaign_display_df(df_f)
     st.dataframe(df_all, use_container_width=True, hide_index=True)
     st.download_button(
