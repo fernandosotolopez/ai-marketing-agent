@@ -959,6 +959,301 @@ st.markdown(
         padding: 0.45rem 0;
         border-bottom: 1px solid rgba(128, 128, 128, 0.18);
     }
+    .mini-stat-card {
+        border: 1px solid rgba(128, 128, 128, 0.22);
+        border-radius: 10px;
+        padding: 0.7rem 0.85rem;
+        background: rgba(250, 250, 250, 0.02);
+        margin-bottom: 0.6rem;
+    }
+    .mini-stat-value {
+        font-size: 1.05rem;
+        font-weight: 700;
+        line-height: 1.2;
+    }
+    .decision-panel {
+        border: 1px solid rgba(128, 128, 128, 0.22);
+        border-radius: 14px;
+        padding: 0.85rem 1rem;
+        background: rgba(250, 250, 250, 0.02);
+        margin-bottom: 0.75rem;
+    }
+    .queue-item {
+        border: 1px solid rgba(128, 128, 128, 0.16);
+        border-radius: 12px;
+        padding: 0.65rem 0.75rem;
+        background: rgba(250, 250, 250, 0.015);
+        margin-bottom: 0.55rem;
+    }
+    .queue-item-active {
+        border-color: rgba(245, 158, 11, 0.4);
+        background: rgba(245, 158, 11, 0.06);
+    }
+    .queue-campaign {
+        font-size: 0.95rem;
+        font-weight: 700;
+        margin-bottom: 0.2rem;
+    }
+    .queue-reason {
+        font-size: 0.9rem;
+        line-height: 1.35;
+        margin-top: 0.35rem;
+        margin-bottom: 0.25rem;
+    }
+    .queue-evidence {
+        font-size: 0.82rem;
+        opacity: 0.82;
+        line-height: 1.3;
+    }
+    .brief-highlight {
+        border-left: 3px solid rgba(245, 158, 11, 0.65);
+        padding-left: 0.8rem;
+        margin-bottom: 0.75rem;
+    }
+    .metric-row-label {
+        font-size: 0.74rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        opacity: 0.72;
+        margin-bottom: 0.15rem;
+    }
+    .metric-row-value {
+        font-size: 1rem;
+        font-weight: 600;
+        line-height: 1.2;
+    }
+    .top-strip {
+        border: 1px solid rgba(128, 128, 128, 0.18);
+        border-radius: 14px;
+        padding: 0.8rem 0.95rem;
+        background: linear-gradient(180deg, rgba(250, 250, 250, 0.03), rgba(250, 250, 250, 0.015));
+        margin-bottom: 0.85rem;
+    }
+    .top-strip-title {
+        font-size: 1.08rem;
+        font-weight: 700;
+        line-height: 1.25;
+        margin-bottom: 0.2rem;
+    }
+    .top-strip-text {
+        font-size: 0.92rem;
+        line-height: 1.35;
+        opacity: 0.9;
+    }
+    .hero-stat {
+        border-left: 1px solid rgba(128, 128, 128, 0.18);
+        padding-left: 0.9rem;
+        height: 100%;
+    }
+    .hero-stat-value {
+        font-size: 1rem;
+        font-weight: 700;
+        line-height: 1.25;
+    }
+    .queue-shell {
+        border: 1px solid rgba(128, 128, 128, 0.18);
+        border-radius: 14px;
+        padding: 0.75rem 0.8rem;
+        background: rgba(250, 250, 250, 0.015);
+    }
+    .hero-kicker {
+        font-size: 0.76rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        opacity: 0.72;
+        margin-bottom: 0.35rem;
+    }
+    .hero-main {
+        font-size: 1.08rem;
+        font-weight: 700;
+        line-height: 1.28;
+        margin-bottom: 0.28rem;
+    }
+    .hero-sub {
+        font-size: 0.92rem;
+        line-height: 1.35;
+        opacity: 0.9;
+    }
+    .hero-inline-metric {
+        font-size: 0.9rem;
+        line-height: 1.35;
+        margin-top: 0.4rem;
+    }
+    .hero-band {
+        border: 1px solid rgba(128, 128, 128, 0.18);
+        border-radius: 16px;
+        padding: 0.95rem 1.05rem;
+        background: linear-gradient(180deg, rgba(250, 250, 250, 0.03), rgba(250, 250, 250, 0.015));
+        margin-bottom: 1rem;
+    }
+    .hero-band-main {
+        font-size: 1.08rem;
+        font-weight: 700;
+        line-height: 1.28;
+        margin-bottom: 0.28rem;
+    }
+    .hero-band-sub {
+        font-size: 0.92rem;
+        line-height: 1.38;
+        opacity: 0.9;
+    }
+    .hero-band-focus {
+        margin-top: 0.85rem;
+        padding-top: 0.85rem;
+        border-top: 1px solid rgba(128, 128, 128, 0.14);
+        display: grid;
+        grid-template-columns: 1.2fr 1fr;
+        gap: 1rem;
+    }
+    .hero-focus-title {
+        font-size: 0.76rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        opacity: 0.68;
+        margin-bottom: 0.2rem;
+    }
+    .hero-focus-value {
+        font-size: 1rem;
+        font-weight: 700;
+        line-height: 1.3;
+    }
+    .hero-focus-support {
+        font-size: 0.88rem;
+        line-height: 1.36;
+        opacity: 0.84;
+        margin-top: 0.2rem;
+    }
+    .decision-console {
+        border: 1px solid rgba(128, 128, 128, 0.18);
+        border-radius: 18px;
+        padding: 1.15rem 1.2rem;
+        background: linear-gradient(180deg, rgba(250, 250, 250, 0.03), rgba(250, 250, 250, 0.012));
+        margin-bottom: 0.95rem;
+    }
+    .decision-console-kicker {
+        font-size: 0.76rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        opacity: 0.68;
+        margin-bottom: 0.35rem;
+    }
+    .decision-console-campaign {
+        font-size: 1.45rem;
+        font-weight: 700;
+        line-height: 1.2;
+        margin-bottom: 0.35rem;
+    }
+    .decision-console-why {
+        font-size: 1.02rem;
+        line-height: 1.45;
+        font-weight: 600;
+        margin-top: 0.7rem;
+        margin-bottom: 0.9rem;
+    }
+    .decision-console-next {
+        font-size: 0.96rem;
+        line-height: 1.4;
+    }
+    .decision-console-side {
+        padding-left: 1rem;
+        border-left: 1px solid rgba(128, 128, 128, 0.14);
+        height: 100%;
+    }
+    .decision-console-metric {
+        margin-bottom: 0.85rem;
+    }
+    .selector-strip {
+        margin-top: 0.25rem;
+        margin-bottom: 1rem;
+    }
+    .selector-strip-title {
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        opacity: 0.68;
+        margin-bottom: 0.45rem;
+    }
+    .selector-caption {
+        font-size: 0.85rem;
+        line-height: 1.3;
+        opacity: 0.8;
+        margin-top: 0.25rem;
+    }
+    .brief-card {
+        border: 1px solid rgba(128, 128, 128, 0.18);
+        border-radius: 14px;
+        padding: 1.05rem 1.1rem;
+        background: rgba(250, 250, 250, 0.02);
+        margin-bottom: 0.95rem;
+    }
+    .brief-section-title {
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        opacity: 0.72;
+        margin-bottom: 0.35rem;
+    }
+    .brief-action {
+        font-size: 1.02rem;
+        font-weight: 600;
+        line-height: 1.35;
+    }
+    .quiet-label {
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        opacity: 0.65;
+        margin-bottom: 0.2rem;
+    }
+    .brief-metric-strip {
+        padding: 0.2rem 0 0.8rem 0;
+        border-bottom: 1px solid rgba(128, 128, 128, 0.14);
+        margin-bottom: 1rem;
+    }
+    .brief-secondary-card {
+        border: 1px solid rgba(128, 128, 128, 0.14);
+        border-radius: 12px;
+        padding: 0.9rem 0.95rem;
+        background: rgba(250, 250, 250, 0.015);
+        margin-bottom: 0.8rem;
+    }
+    .brief-evidence-list {
+        margin: 0.2rem 0 0 0;
+        padding-left: 1rem;
+    }
+    .brief-evidence-list li {
+        margin-bottom: 0.35rem;
+        line-height: 1.35;
+    }
+    .brief-primary-text {
+        font-size: 1.02rem;
+        line-height: 1.45;
+        font-weight: 600;
+        margin-bottom: 0.8rem;
+    }
+    .brief-section-block {
+        margin-top: 0.95rem;
+        padding-top: 0.95rem;
+        border-top: 1px solid rgba(128, 128, 128, 0.12);
+    }
+    .brief-muted {
+        font-size: 0.88rem;
+        line-height: 1.4;
+        opacity: 0.82;
+    }
+    .secondary-heading {
+        font-size: 0.95rem;
+        font-weight: 600;
+        margin-bottom: 0.35rem;
+    }
+    .stButton > button {
+        border-radius: 12px;
+        padding: 0.72rem 0.82rem;
+        white-space: pre-wrap;
+        text-align: left;
+        line-height: 1.28;
+        min-height: 94px;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -1002,6 +1297,7 @@ if source_mode == "Upload CSV":
 run_meta = ""
 df_run = None
 selected_run_id = None
+run_details_text = ""
 
 if source_mode == "Saved run":
     if db_runs_df.empty:
@@ -1053,8 +1349,6 @@ else:  # Runs folder
         st.stop()
     run_meta = f"Run folder: {chosen_run}"
 
-st.caption("Reviewing: " + run_meta)
-
 if source_mode == "Saved run" and not df_run.empty:
     run_row = df_run.iloc[0]
     run_bits = []
@@ -1070,8 +1364,10 @@ if source_mode == "Saved run" and not df_run.empty:
     notes_text = _clean_text(run_row.get("run_notes"))
     if notes_text:
         run_bits.append(f"notes={notes_text}")
-    if run_bits:
-        st.caption("Review context: " + " | ".join(run_bits))
+    run_details_text = " | ".join(run_bits)
+
+if not run_details_text:
+    run_details_text = run_meta
 
 # Filters
 all_stances = sorted([s for s in df_run["stance"].dropna().unique() if str(s).strip()])
@@ -1112,88 +1408,11 @@ else:
     top_priority = "Low"
     top_reason = "No campaigns match the current filters."
 
-hero1, hero2, hero3 = st.columns([2.2, 1.8, 2.2])
-with hero1:
-    st.markdown(
-        """
-        <div class="summary-card">
-            <div class="summary-label">What this does</div>
-            <div class="summary-value">Turns campaign diagnostics into a prioritized review queue and a single executive brief.</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-with hero2:
-    st.markdown(
-        f"""
-        <div class="summary-card">
-            <div class="summary-label">Top campaign</div>
-            <div class="summary-value">{top_campaign}</div>
-            <div class="summary-text">{top_action} | {top_priority} priority</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-with hero3:
-    st.markdown(
-        f"""
-        <div class="summary-card">
-            <div class="summary-label">Why it needs attention</div>
-            <div class="summary-value">{top_reason}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
 # -----------------------------
 # Priority review queue
 # -----------------------------
-st.subheader("Decision queue")
-st.caption("Review the top rows, then open the executive brief directly below.")
-
 if df_f.empty:
     st.info("No campaigns match the current filters.")
-else:
-    df_queue = sorted_df.head(8).copy()
-    summary_bits = [f"{action_count} campaign(s) currently need attention"]
-    if top_issue:
-        summary_bits.append(f"Top issue: {top_issue}")
-    st.write(" | ".join(summary_bits))
-    header_cols = st.columns([2.2, 1.6, 4.0, 2.4, 1.2])
-    headers = ["Campaign", "Review", "Why it matters", "Evidence", ""]
-    for col, header in zip(header_cols, headers):
-        with col:
-            if header:
-                st.markdown(f"<div class='queue-header'>{header}</div>", unsafe_allow_html=True)
-
-    for _, r in df_queue.iterrows():
-        cid = str(r.get("campaign_id"))
-        sev = str(r.get("severity", "—"))
-        stance = str(r.get("stance", "—"))
-        decision_label = _format_decision_label(stance)
-        priority_label = _format_risk_label(sev).title()
-        reason = _humanize_reason(_short_reason(r.get("decision_explanation"), max_len=95))
-        evidence = _key_evidence_line(r, max_items=1)
-        row_cols = st.columns([2.2, 1.6, 4.0, 2.4, 1.2])
-        with row_cols[0]:
-            st.markdown(f"<div class='queue-row'><strong>{cid}</strong></div>", unsafe_allow_html=True)
-        with row_cols[1]:
-            st.markdown(
-                f"<div class='queue-row'>{_badge_html(decision_label, _decision_css_class(stance))}{_badge_html(priority_label, _priority_css_class(sev))}</div>",
-                unsafe_allow_html=True,
-            )
-        with row_cols[2]:
-            st.markdown(f"<div class='queue-row'>{reason or 'No summary available.'}</div>", unsafe_allow_html=True)
-        with row_cols[3]:
-            st.markdown(
-                f"<div class='queue-row'><span class='summary-text'>{evidence or 'No evidence summary available.'}</span></div>",
-                unsafe_allow_html=True,
-            )
-        with row_cols[4]:
-            if st.button("Open brief", key=f"open_{cid}"):
-                st.session_state["selected_campaign"] = cid
-
-if df_f.empty:
     st.stop()
 
 selected_campaign = st.session_state["selected_campaign"]
@@ -1201,65 +1420,120 @@ if selected_campaign not in campaign_options:
     selected_campaign = campaign_options[0]
     st.session_state["selected_campaign"] = selected_campaign
 
+selected_campaign = st.session_state["selected_campaign"]
 row = df_run[df_run["campaign_id"] == selected_campaign].iloc[0]
-
-st.divider()
-brief_top_left, brief_top_right = st.columns([3.5, 1.7])
-with brief_top_left:
-    st.subheader(f"Executive brief: {selected_campaign}")
-with brief_top_right:
-    idx = campaign_options.index(selected_campaign)
-    selected_campaign = st.selectbox("Focused campaign", options=campaign_options, index=idx, label_visibility="collapsed")
-    st.session_state["selected_campaign"] = selected_campaign
-    row = df_run[df_run["campaign_id"] == selected_campaign].iloc[0]
-
-d1, d2, d3, d4, d5 = st.columns(5)
 
 stance_val = row.get("stance")
 severity_val = row.get("severity")
+explanation = _clean_text(row.get("decision_explanation"))
+explanation_human = _humanize_reason(explanation)
+primary_action = row.get("advisor_actions", [])
+evidence_bits = _build_evidence_bits(row)
+action_text = "No recommended next steps are available for this campaign."
+if isinstance(primary_action, list) and primary_action:
+    action_text = primary_action[0]
 
-d1.metric("Recommended review", _format_decision_label(stance_val))
-d2.metric("Priority", _format_risk_label(severity_val).title())
-d3.metric("CPA", f"{row['cpa']:.2f}" if pd.notna(row.get("cpa")) else "—")
-d4.metric("Target CPA", f"{row['target_cpa']:.2f}" if pd.notna(row.get("target_cpa")) else "—")
-d5.metric("Efficiency vs target", f"{row['cpa_ratio']:.2f}" if pd.notna(row.get("cpa_ratio")) else "—")
-
-st.divider()
-
-primary_left, primary_right = st.columns([3.2, 2.1])
-with primary_left:
-    st.markdown("### Recommendation summary")
+console_left, console_right = st.columns([2.45, 1.0], gap="large")
+with console_left:
     st.markdown(
-        _badge_html(_format_decision_label(row.get("stance")), _decision_css_class(row.get("stance")))
+        f"""
+        <div class="decision-console">
+            <div class="decision-console-kicker">Focused campaign</div>
+            <div class="decision-console-campaign">{selected_campaign}</div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        _badge_html(_format_decision_label(stance_val), _decision_css_class(stance_val))
         + _badge_html(
-            f"{_format_risk_label(row.get('severity')).title()} priority",
-            _priority_css_class(row.get("severity")),
+            f"{_format_risk_label(severity_val).title()} priority",
+            _priority_css_class(severity_val),
         ),
         unsafe_allow_html=True,
     )
+    st.markdown(
+        f"""
+            <div class="decision-console-why">{explanation_human or "No summary available."}</div>
+            <div class="brief-section-title">Recommended next move</div>
+            <div class="decision-console-next">{action_text}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with console_right:
+    evidence_html = "".join(f"<li>{bit}</li>" for bit in evidence_bits[:2]) if evidence_bits else "<li>No supporting evidence available.</li>"
+    st.markdown(
+        f"""
+        <div class="decision-console decision-console-side">
+            <div class="decision-console-metric">
+                <div class="brief-section-title">Supporting evidence</div>
+                <ul class="brief-evidence-list">{evidence_html}</ul>
+            </div>
+            <div class="decision-console-metric">
+                <div class="metric-row-label">CPA</div>
+                <div class="metric-row-value">{f"{row['cpa']:.2f}" if pd.notna(row.get("cpa")) else "—"}</div>
+            </div>
+            <div class="decision-console-metric">
+                <div class="metric-row-label">Target CPA</div>
+                <div class="metric-row-value">{f"{row['target_cpa']:.2f}" if pd.notna(row.get("target_cpa")) else "—"}</div>
+            </div>
+            <div class="decision-console-metric" style="margin-bottom:0;">
+                <div class="metric-row-label">Efficiency vs target</div>
+                <div class="metric-row-value">{f"{row['cpa_ratio']:.2f}" if pd.notna(row.get("cpa_ratio")) else "—"}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    explanation = _clean_text(row.get("decision_explanation"))
-    explanation_human = _humanize_reason(explanation)
-    if explanation:
-        st.write(f"**Why it matters:** {explanation_human}")
+st.markdown(
+    """
+    <div class="selector-strip">
+        <div class="selector-strip-title">Review other campaigns</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+df_queue = sorted_df.head(4).copy()
+queue_cols = st.columns(4, gap="small")
+for i, (_, r) in enumerate(df_queue.iterrows()):
+    cid = str(r.get("campaign_id"))
+    sev = str(r.get("severity", "—"))
+    stance = str(r.get("stance", "—"))
+    decision_label = _format_decision_label(stance)
+    priority_label = _format_risk_label(sev).title()
+    reason = _humanize_reason(_short_reason(r.get("decision_explanation"), max_len=54)) or "No summary available."
+    label = f"{cid}\n{decision_label} | {priority_label}\n{reason}"
+    is_active = cid == st.session_state["selected_campaign"]
+    with queue_cols[i % 4]:
+        if st.button(
+            label,
+            key=f"queue_{cid}",
+            use_container_width=True,
+            type="primary" if is_active else "secondary",
+        ):
+            st.session_state["selected_campaign"] = cid
+            st.rerun()
+        if is_active:
+            st.caption("Current focus")
 
-    primary_action = row.get("advisor_actions", [])
-    if isinstance(primary_action, list) and primary_action:
-        st.write(f"**Recommended next step:** {primary_action[0]}")
-
-    evidence_bits = _build_evidence_bits(row)
-    if evidence_bits:
-        st.write("**Supporting evidence:**")
-        for bit in evidence_bits[:4]:
-            st.write(f"- {bit}")
-with primary_right:
-    st.markdown("### What to do next")
-    advisor_actions = row.get("advisor_actions", [])
-    if isinstance(advisor_actions, list) and advisor_actions:
-        for i, a in enumerate(advisor_actions[:3], 1):
-            st.write(f"{i}. {a}")
-    else:
-        st.write("No recommended next steps are available for this campaign.")
+st.divider()
+st.markdown(f"### Executive brief: {selected_campaign}")
+brief_cols = st.columns(3, gap="large")
+brief_metrics = [
+    ("CPA", f"{row['cpa']:.2f}" if pd.notna(row.get("cpa")) else "—"),
+    ("Target CPA", f"{row['target_cpa']:.2f}" if pd.notna(row.get("target_cpa")) else "—"),
+    ("Efficiency vs target", f"{row['cpa_ratio']:.2f}" if pd.notna(row.get("cpa_ratio")) else "—"),
+]
+for col, (label, value) in zip(brief_cols, brief_metrics):
+    with col:
+        st.markdown(
+            f"""
+            <div class="metric-row-label">{label}</div>
+            <div class="metric-row-value">{value}</div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 reasons = row.get("reasons", [])
 extra_reasons = []
@@ -1287,50 +1561,56 @@ for k in ["advisor_confidence", "advisor_used_llm", "advisor_model"]:
         meta_bits.append(f"{meta_label_map[k]}={v}")
 
 st.divider()
-support_left, support_right = st.columns([2.3, 1.7])
-with support_left:
-    st.markdown("### Illustrative what-if scenarios")
-    st.caption(
-        "These scenarios are illustrative decision-support views based on simplified assumptions. They are directional, not predictive forecasts."
-    )
-    scenarios = row.get("scenarios", [])
-    df_whatif = scenarios_to_df(scenarios if isinstance(scenarios, list) else [])
-    if df_whatif.empty:
-        st.caption("No illustrative scenarios were stored for this campaign.")
-    else:
-        df_whatif_display = df_whatif.rename(
-            columns={
-                "scenario_name": "Scenario",
-                "budget_multiplier": "Budget change",
-                "projected_CPA": "Illustrative CPA",
-                "projected_ROAS": "Illustrative ROAS",
-                "notes": "Notes",
-            }
-        )
-        w1, w2 = st.columns(2)
-        fig_roas, fig_cpa = make_what_if_charts(df_whatif)
-        with w1:
-            st.plotly_chart(fig_roas, use_container_width=True)
-        with w2:
-            st.plotly_chart(fig_cpa, use_container_width=True)
-        st.dataframe(df_whatif_display, use_container_width=True, hide_index=True)
-with support_right:
-    has_support = bool(extra_reasons or warnings or meta_bits or (pd.notna(advisor_summary) and str(advisor_summary).strip()))
-    if has_support:
-        st.markdown("### Supporting notes")
+has_support = bool(extra_reasons or warnings or meta_bits or (pd.notna(advisor_summary) and str(advisor_summary).strip()))
+if has_support:
+    st.markdown("### Supporting rationale")
+    support_cols = st.columns([1.2, 1.0], gap="large")
+    with support_cols[0]:
         if extra_reasons:
             st.markdown("**Additional reasons**")
             for reason in extra_reasons[:3]:
                 st.write(f"- {reason}")
+        if pd.notna(advisor_summary) and str(advisor_summary).strip():
+            st.markdown("**Advisor summary**")
+            st.write(str(advisor_summary))
+    with support_cols[1]:
         if isinstance(warnings, list) and warnings:
             st.markdown("**Data notes**")
             for warning in warnings[:3]:
                 st.write(f"- {_humanize_reason(warning)}")
-        if pd.notna(advisor_summary) and str(advisor_summary).strip():
-            st.markdown("**Advisor summary**")
-            st.write(str(advisor_summary))
         if meta_bits:
+            st.markdown("**Model context**")
             st.caption(" | ".join(meta_bits))
+
+st.divider()
+st.markdown("### Scenario explorer")
+st.caption(
+    "These scenarios are illustrative decision-support views based on simplified assumptions. They are directional, not predictive forecasts."
+)
+scenarios = row.get("scenarios", [])
+df_whatif = scenarios_to_df(scenarios if isinstance(scenarios, list) else [])
+if df_whatif.empty:
+    st.caption("No illustrative scenarios were stored for this campaign.")
+else:
+    df_whatif_display = df_whatif.rename(
+        columns={
+            "scenario_name": "Scenario",
+            "budget_multiplier": "Budget change",
+            "projected_CPA": "Illustrative CPA",
+            "projected_ROAS": "Illustrative ROAS",
+            "notes": "Notes",
+        }
+    )
+    whatif_chart_col, whatif_table_col = st.columns([1.35, 1.0], gap="large")
+    with whatif_chart_col:
+        chart_left, chart_right = st.columns(2)
+        fig_roas, fig_cpa = make_what_if_charts(df_whatif)
+        with chart_left:
+            st.plotly_chart(fig_roas, use_container_width=True)
+        with chart_right:
+            st.plotly_chart(fig_cpa, use_container_width=True)
+    with whatif_table_col:
+        st.dataframe(df_whatif_display, use_container_width=True, hide_index=True)
 
 analysis_sum = row.get("analysis_summary", pd.NA)
 ins = row.get("analysis_insights", [])
@@ -1374,9 +1654,11 @@ with st.expander("Portfolio overview", expanded=False):
     k3.metric("High priority", f"{high_count}")
     k4.metric("Below break-even", f"{roas_lt_1}")
     k5.metric("Avg efficiency vs target", f"{avg_cpa_ratio:.2f}" if campaigns_count else "—")
-    st.caption("Use this section for portfolio-level pattern scanning, not primary decision review.")
-    fig = make_scatter_ratio(df_f)
-    st.plotly_chart(fig, use_container_width=True)
+    st.caption("Portfolio scan for broader patterns, not campaign-level decision making.")
+    with st.expander("Performance map", expanded=False):
+        st.caption("Compare efficiency versus profitability across the filtered portfolio.")
+        fig = make_scatter_ratio(df_f)
+        st.plotly_chart(fig, use_container_width=True)
 
 with st.expander("Campaign table", expanded=False):
     df_all = build_campaign_display_df(df_f)
@@ -1387,3 +1669,6 @@ with st.expander("Campaign table", expanded=False):
         file_name="campaigns_filtered.csv",
         mime="text/csv",
     )
+
+with st.expander("Run details", expanded=False):
+    st.write(run_details_text or "No run details available.")
