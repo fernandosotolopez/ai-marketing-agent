@@ -295,6 +295,136 @@ def _build_evidence_bits(row: pd.Series) -> List[str]:
     return bits
 
 
+def _build_decision_signal_bits(row: pd.Series) -> List[str]:
+    bits: List[str] = []
+
+    cpa = row.get("cpa")
+    target_cpa = row.get("target_cpa")
+    roas = row.get("roas")
+    cpa_trend = row.get("cpa_trend_7d")
+    roas_trend = row.get("roas_trend_7d")
+
+    if pd.notna(cpa) and pd.notna(target_cpa) and float(target_cpa) > 0:
+        over_pct = (float(cpa) / float(target_cpa) - 1) * 100
+        if over_pct > 0:
+            bits.append(f"CPA is {over_pct:.0f}% above target ({float(cpa):.2f} vs {float(target_cpa):.2f}).")
+
+    if pd.notna(cpa_trend) and float(cpa_trend) > 0:
+        bits.append(f"CPA has worsened {_format_pct(cpa_trend)} over the last 7 days.")
+
+    if pd.notna(roas_trend) and float(roas_trend) < 0:
+        bits.append(f"ROAS has weakened {_format_pct(roas_trend)} over the last 7 days.")
+
+    if pd.notna(roas) and float(roas) < 1.0:
+        bits.append(f"ROAS is below 1.0 at {float(roas):.2f}, indicating potential loss on ad spend before lifetime value.")
+
+    return bits
+
+
+def _build_action_options(row: pd.Series, primary_action: str) -> List[str]:
+    options: List[str] = []
+    seen: set[str] = set()
+
+    primary_key = _clean_text(primary_action).strip().lower()
+    if primary_key:
+        seen.add(primary_key)
+
+    advisor_actions = row.get("advisor_actions", [])
+    if isinstance(advisor_actions, list):
+        for action in advisor_actions:
+            clean_action = _clean_text(action)
+            key = clean_action.strip().lower()
+            if clean_action and key not in seen:
+                options.append(clean_action)
+                seen.add(key)
+
+    suggested_actions = row.get("analysis_suggested_actions", [])
+    if isinstance(suggested_actions, list):
+        for action in suggested_actions:
+            clean_action = _clean_text(action)
+            key = clean_action.strip().lower()
+            if clean_action and key not in seen:
+                options.append(clean_action)
+                seen.add(key)
+
+    return options
+
+
+def make_hero_cpa_visual(row: pd.Series) -> go.Figure:
+    cpa = _safe_float(row.get("cpa"))
+    target_cpa = _safe_float(row.get("target_cpa"))
+
+    if np.isnan(cpa) and np.isnan(target_cpa):
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No CPA data available",
+            x=0.5,
+            y=0.5,
+            xref="paper",
+            yref="paper",
+            showarrow=False,
+            font={"size": 16, "color": "rgba(248,250,252,0.72)"},
+        )
+        fig.update_layout(
+            height=240,
+            margin=dict(l=0, r=0, t=0, b=0),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            xaxis={"visible": False},
+            yaxis={"visible": False},
+        )
+        return fig
+
+    max_val = max(cpa if not np.isnan(cpa) else 0, target_cpa if not np.isnan(target_cpa) else 0, 1.0)
+    bar_color = "#f59e0b"
+    if not np.isnan(cpa) and not np.isnan(target_cpa):
+        bar_color = "#fb7185" if cpa > target_cpa else "#34d399"
+
+    threshold_value = float(target_cpa) if not np.isnan(target_cpa) else max_val
+    fig = go.Figure(
+        go.Indicator(
+            mode="number+gauge",
+            value=0.0 if np.isnan(cpa) else float(cpa),
+            number={"font": {"size": 34, "color": "#f8fafc"}},
+            title={"text": "<span style='font-size:12px;color:rgba(248,250,252,0.65)'>ACTUAL CPA</span>"},
+            gauge={
+                "shape": "bullet",
+                "axis": {"range": [None, max_val * 1.25], "visible": False},
+                "bar": {"color": bar_color, "thickness": 0.5},
+                "bgcolor": "rgba(148,163,184,0.12)",
+                "steps": [{"range": [0, max_val * 1.25], "color": "rgba(148,163,184,0.12)"}],
+                "threshold": {
+                    "line": {"color": "rgba(248,250,252,0.95)", "width": 3},
+                    "thickness": 0.95,
+                    "value": threshold_value,
+                },
+            },
+        )
+    )
+    fig.add_annotation(
+        text=(
+            f"Target CPA {target_cpa:.2f}"
+            if not np.isnan(target_cpa)
+            else "Target CPA unavailable"
+        ),
+        x=0,
+        y=0.02,
+        xref="paper",
+        yref="paper",
+        xanchor="left",
+        yanchor="bottom",
+        showarrow=False,
+        font={"size": 12, "color": "rgba(248,250,252,0.72)"},
+    )
+    fig.update_layout(
+        height=240,
+        margin=dict(l=0, r=0, t=20, b=10),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
+    return fig
+
+
 def sort_campaigns_for_review(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df.copy()
@@ -1324,87 +1454,184 @@ st.markdown(
         opacity: 0.78;
         margin-bottom: 0.65rem;
     }
-    .hero-brief {
+    .hero-console-panel {
         border: 1px solid rgba(128, 128, 128, 0.18);
-        border-radius: 20px;
-        padding: 1.05rem 1.15rem 1rem 1.15rem;
+        border-radius: 18px;
+        padding: 0.9rem 1rem;
         background: linear-gradient(180deg, rgba(250, 250, 250, 0.03), rgba(250, 250, 250, 0.012));
-        margin-bottom: 0.85rem;
+        margin-bottom: 0.75rem;
+        height: 100%;
     }
-    .hero-brief-kicker {
+    .hero-console-primary {
+        padding-bottom: 0.82rem;
+    }
+    .hero-console-kicker {
         font-size: 0.76rem;
         text-transform: uppercase;
         letter-spacing: 0.06em;
         opacity: 0.68;
-        margin-bottom: 0.35rem;
+        margin-bottom: 0.28rem;
     }
-    .hero-brief-top {
+    .hero-console-header {
         display: flex;
+        align-items: center;
         justify-content: space-between;
-        align-items: flex-start;
-        gap: 1rem;
-        margin-bottom: 0.75rem;
+        gap: 0.9rem;
+        margin-bottom: 0.5rem;
     }
-    .hero-brief-campaign {
-        font-size: 1rem;
+    .hero-console-campaign {
+        font-size: 1.14rem;
         font-weight: 700;
         line-height: 1.2;
     }
-    .hero-brief-problem {
-        font-size: 1.12rem;
-        line-height: 1.44;
+    .hero-console-badges {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 0.35rem;
+    }
+    .hero-console-problem {
+        font-size: 1.16rem;
+        line-height: 1.38;
         font-weight: 600;
-        max-width: 54rem;
-        margin-bottom: 0.95rem;
+        margin: 0;
     }
-    .hero-brief-grid {
-        display: grid;
-        grid-template-columns: 1.18fr 0.92fr;
-        gap: 1rem;
-        align-items: start;
+    .hero-console-section-title {
+        font-size: 0.76rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        opacity: 0.68;
+        margin-bottom: 0.4rem;
     }
-    .hero-brief-panel {
-        border-top: 1px solid rgba(128, 128, 128, 0.12);
-        padding-top: 0.85rem;
-    }
-    .hero-brief-action {
-        font-size: 0.98rem;
-        line-height: 1.42;
+    .hero-console-action {
+        font-size: 1.02rem;
+        line-height: 1.4;
         font-weight: 600;
+        margin-bottom: 0.65rem;
     }
-    .hero-brief-evidence {
-        margin: 0.18rem 0 0 0;
+    .hero-console-evidence {
+        margin: 0.1rem 0 0 0;
         padding-left: 1rem;
     }
-    .hero-brief-evidence li {
-        margin-bottom: 0.32rem;
-        line-height: 1.34;
+    .hero-console-evidence li {
+        margin-bottom: 0.3rem;
+        line-height: 1.33;
     }
-    .hero-brief-metrics {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+    .hero-console-switcher-copy {
+        font-size: 0.85rem;
+        line-height: 1.32;
+        opacity: 0.8;
+        margin-bottom: 0.55rem;
+    }
+    .hero-decision-panel {
+        border: 1px solid rgba(128, 128, 128, 0.18);
+        border-radius: 18px;
+        padding: 0.95rem 1.05rem;
+        background: linear-gradient(180deg, rgba(250, 250, 250, 0.03), rgba(250, 250, 250, 0.012));
+        min-height: 100%;
+    }
+    .hero-decision-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
         gap: 0.9rem;
-        margin-top: 0.82rem;
+        margin-bottom: 0.55rem;
     }
-    .hero-rail {
-        border: 1px solid rgba(128, 128, 128, 0.14);
-        border-radius: 16px;
-        padding: 0.78rem 0.9rem 0.35rem 0.9rem;
-        background: rgba(250, 250, 250, 0.014);
-        margin-bottom: 1rem;
+    .hero-decision-campaign {
+        font-size: 1.2rem;
+        font-weight: 700;
+        line-height: 1.2;
     }
-    .hero-rail-title {
-        font-size: 0.78rem;
+    .hero-diagnosis {
+        font-size: 1.14rem;
+        line-height: 1.4;
+        font-weight: 600;
+        margin-bottom: 0.85rem;
+    }
+    .hero-next-step {
+        padding-top: 0.72rem;
+        margin-top: 0.72rem;
+        border-top: 1px solid rgba(128, 128, 128, 0.12);
+    }
+    .hero-next-step-label {
+        font-size: 0.76rem;
         text-transform: uppercase;
-        letter-spacing: 0.06em;
+        letter-spacing: 0.05em;
         opacity: 0.68;
         margin-bottom: 0.3rem;
     }
-    .hero-rail-caption {
+    .hero-next-step-text {
+        font-size: 1.02rem;
+        line-height: 1.4;
+        font-weight: 600;
+    }
+    .hero-why-list {
+        margin: 0.55rem 0 0 0;
+        padding-left: 1rem;
+    }
+    .hero-why-list li {
+        margin-bottom: 0.28rem;
+        line-height: 1.34;
+    }
+    .hero-visual-title {
+        font-size: 0.76rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        opacity: 0.68;
+        margin-bottom: 0.3rem;
+    }
+    .hero-visual-caption {
         font-size: 0.84rem;
-        line-height: 1.28;
+        line-height: 1.3;
         opacity: 0.78;
-        margin-bottom: 0.55rem;
+        margin-bottom: 0.3rem;
+    }
+    .hero-selector-shell {
+        border: 1px solid rgba(128, 128, 128, 0.14);
+        border-radius: 16px;
+        padding: 0.78rem 0.95rem 0.35rem 0.95rem;
+        background: rgba(250, 250, 250, 0.014);
+        margin: 0.2rem 0 1rem 0;
+    }
+    .snapshot-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.75rem 1rem;
+        margin-top: 0.15rem;
+    }
+    .snapshot-item {
+        padding-bottom: 0.08rem;
+    }
+    .snapshot-label {
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        opacity: 0.66;
+        margin-bottom: 0.12rem;
+    }
+    .snapshot-value {
+        font-size: 0.96rem;
+        font-weight: 600;
+        line-height: 1.24;
+    }
+    .section-intro {
+        font-size: 0.9rem;
+        line-height: 1.4;
+        opacity: 0.82;
+        margin-bottom: 0.65rem;
+    }
+    .context-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.75rem 1rem;
+        margin-top: 0.35rem;
+    }
+    .appendix-card {
+        border: 1px solid rgba(128, 128, 128, 0.12);
+        border-radius: 12px;
+        padding: 0.8rem 0.9rem;
+        background: rgba(250, 250, 250, 0.012);
+        margin-bottom: 0.8rem;
     }
     .stButton > button {
         border-radius: 12px;
@@ -1591,7 +1818,6 @@ severity_val = row.get("severity")
 explanation = _clean_text(row.get("decision_explanation"))
 explanation_human = _humanize_reason(explanation)
 primary_action = row.get("advisor_actions", [])
-evidence_bits = _build_evidence_bits(row)
 action_text = "No recommended next steps are available for this campaign."
 if isinstance(primary_action, list) and primary_action:
     action_text = primary_action[0]
@@ -1609,73 +1835,115 @@ if isinstance(reasons, list):
 
 warnings = row.get("warnings", [])
 advisor_summary = row.get("advisor_summary", pd.NA)
-meta_bits = []
-meta_label_map = {
-    "advisor_confidence": "confidence",
-    "advisor_used_llm": "uses llm",
-    "advisor_model": "model",
-}
-for k in ["advisor_confidence", "advisor_used_llm", "advisor_model"]:
-    v = row.get(k, pd.NA)
-    if pd.notna(v) and str(v).strip() and str(v).lower() != "nan":
-        meta_bits.append(f"{meta_label_map[k]}={v}")
 
-evidence_html = "".join(f"<li>{bit}</li>" for bit in evidence_bits[:2]) if evidence_bits else "<li>No supporting evidence available.</li>"
-st.markdown(
-    f"""
-    <div class="hero-brief">
-        <div class="hero-brief-kicker">Executive decision surface</div>
-        <div class="hero-brief-top">
-            <div>
-                <div class="brief-section-title">Focused campaign</div>
-                <div class="hero-brief-campaign">{selected_campaign}</div>
-            </div>
-            <div>
-                {_badge_html(_format_decision_label(stance_val), _decision_css_class(stance_val))}
-                {_badge_html(f"{_format_risk_label(severity_val).title()} priority", _priority_css_class(severity_val))}
-            </div>
-        </div>
-        <div class="hero-brief-problem">{explanation_human or "No summary available."}</div>
-        <div class="hero-brief-grid">
-            <div class="hero-brief-panel">
-                <div class="brief-section-title">Recommended next move</div>
-                <div class="hero-brief-action">{action_text}</div>
-                <div class="hero-brief-metrics">
-                    <div>
-                        <div class="metric-row-label">Review</div>
-                        <div class="metric-row-value">{_format_decision_label(stance_val)}</div>
-                    </div>
-                    <div>
-                        <div class="metric-row-label">CPA</div>
-                        <div class="metric-row-value">{f"{row['cpa']:.2f}" if pd.notna(row.get("cpa")) else "—"}</div>
-                    </div>
-                    <div>
-                        <div class="metric-row-label">Target CPA</div>
-                        <div class="metric-row-value">{f"{row['target_cpa']:.2f}" if pd.notna(row.get("target_cpa")) else "—"}</div>
-                    </div>
+context_items = []
+advisor_confidence = row.get("advisor_confidence", pd.NA)
+if pd.notna(advisor_confidence) and str(advisor_confidence).strip() and str(advisor_confidence).lower() != "nan":
+    context_items.append(("Confidence", str(advisor_confidence)))
+advisor_used_llm = row.get("advisor_used_llm", pd.NA)
+if pd.notna(advisor_used_llm) and str(advisor_used_llm).strip() and str(advisor_used_llm).lower() != "nan":
+    review_method = "AI-assisted review" if str(advisor_used_llm).strip().lower() in {"1", "true", "yes"} else "Rule-based review"
+    context_items.append(("Review method", review_method))
+advisor_model = row.get("advisor_model", pd.NA)
+if pd.notna(advisor_model) and str(advisor_model).strip() and str(advisor_model).lower() != "nan":
+    context_items.append(("Model", str(advisor_model)))
+
+rationale_summary = ""
+if pd.notna(advisor_summary) and str(advisor_summary).strip():
+    rationale_summary = str(advisor_summary).strip()
+elif extra_reasons:
+    rationale_summary = extra_reasons[0]
+elif warnings:
+    rationale_summary = _humanize_reason(warnings[0])
+
+hero_story_keys = set()
+for value in [explanation_human, action_text]:
+    key = _clean_text(value).strip().lower() if value else ""
+    if key:
+        hero_story_keys.add(key)
+
+rationale_points = []
+rationale_seen = set(hero_story_keys)
+for candidate in extra_reasons[:4]:
+    key = _clean_text(candidate).strip().lower() if candidate else ""
+    if key and key not in rationale_seen:
+        rationale_points.append(candidate)
+        rationale_seen.add(key)
+
+if not rationale_points and rationale_summary:
+    summary_key = _clean_text(rationale_summary).strip().lower()
+    if summary_key and summary_key not in rationale_seen:
+        rationale_points.append(rationale_summary)
+        rationale_seen.add(summary_key)
+
+note_points = []
+for warning in warnings[:3]:
+    clean_warning = _humanize_reason(warning)
+    key = _clean_text(clean_warning).strip().lower() if clean_warning else ""
+    if key and key not in rationale_seen:
+        note_points.append(clean_warning)
+        rationale_seen.add(key)
+diagnostic_points = []
+diagnostic_seen = set()
+for signal in _build_decision_signal_bits(row):
+    key = _clean_text(signal).strip().lower()
+    if key and key not in diagnostic_seen:
+        diagnostic_points.append(signal)
+        diagnostic_seen.add(key)
+
+hero_why_points = diagnostic_points[:3]
+support_points = []
+support_seen = set(hero_story_keys)
+for item in hero_why_points:
+    key = _clean_text(item).strip().lower()
+    if key:
+        support_seen.add(key)
+
+for candidate in diagnostic_points[3:] + rationale_points + note_points:
+    key = _clean_text(candidate).strip().lower() if candidate else ""
+    if key and key not in support_seen:
+        support_points.append(candidate)
+        support_seen.add(key)
+
+action_options = _build_action_options(row, action_text)
+hero_why_html = "".join(f"<li>{point}</li>" for point in hero_why_points)
+hero_left, hero_right = st.columns([1.25, 0.95], gap="large")
+with hero_left:
+    st.markdown(
+        f"""
+        <div class="hero-decision-panel">
+            <div class="hero-console-kicker">Executive decision surface</div>
+            <div class="hero-decision-top">
+                <div class="hero-decision-campaign">{selected_campaign}</div>
+                <div class="hero-console-badges">
+                    {_badge_html(_format_decision_label(stance_val), _decision_css_class(stance_val))}
+                    {_badge_html(f"{_format_risk_label(severity_val).title()} priority", _priority_css_class(severity_val))}
                 </div>
             </div>
-            <div class="hero-brief-panel">
-                <div class="brief-section-title">Supporting evidence</div>
-                <ul class="hero-brief-evidence">{evidence_html}</ul>
-                <div class="metric-row-label" style="margin-top:0.65rem;">Efficiency vs target</div>
-                <div class="metric-row-value">{f"{row['cpa_ratio']:.2f}" if pd.notna(row.get("cpa_ratio")) else "—"}</div>
+            <div class="hero-diagnosis">{explanation_human or "No summary available."}</div>
+            <div class="hero-next-step">
+                <div class="hero-next-step-label">Recommended next move</div>
+                <div class="hero-next-step-text">{action_text}</div>
+            </div>
+            <div class="hero-next-step">
+                <div class="hero-next-step-label">Why this matters</div>
+                <ul class="hero-why-list">{hero_why_html or "<li>No diagnostic detail available.</li>"}</ul>
             </div>
         </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-st.markdown(
-    """
-    <div class="hero-rail">
-        <div class="hero-rail-title">Review other campaigns</div>
-        <div class="hero-rail-caption">Use the selector below to shift focus without leaving the decision flow.</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+        """,
+        unsafe_allow_html=True,
+    )
+with hero_right:
+    st.markdown(
+        """
+        <div class="hero-decision-panel">
+            <div class="hero-visual-title">Actual CPA vs target CPA</div>
+            <div class="hero-visual-caption">The bar shows current CPA. The vertical marker shows the target threshold.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.plotly_chart(make_hero_cpa_visual(row), use_container_width=True)
 df_queue = sorted_df.head(4).copy()
 switcher_options = []
 switcher_labels = {}
@@ -1691,6 +1959,15 @@ if selected_campaign not in switcher_options:
     switcher_labels[selected_campaign] = (
         f"{selected_campaign} | {_format_decision_label(stance_val)} | {_format_risk_label(severity_val).title()}"
     )
+st.markdown(
+    """
+    <div class="hero-selector-shell">
+        <div class="hero-console-section-title">Review other campaigns</div>
+        <div class="hero-console-switcher-copy">Shift focus without leaving the decision flow.</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 selected_campaign = st.radio(
     "Review other campaigns",
     options=switcher_options,
@@ -1702,28 +1979,122 @@ selected_campaign = st.radio(
 )
 st.session_state["selected_campaign"] = selected_campaign
 row = df_run[df_run["campaign_id"] == selected_campaign].iloc[0]
+stance_val = row.get("stance")
+severity_val = row.get("severity")
+explanation = _clean_text(row.get("decision_explanation"))
+explanation_human = _humanize_reason(explanation)
+primary_action = row.get("advisor_actions", [])
+action_text = "No recommended next steps are available for this campaign."
+if isinstance(primary_action, list) and primary_action:
+    action_text = primary_action[0]
+reasons = row.get("reasons", [])
+extra_reasons = []
+if isinstance(reasons, list):
+    seen_reason = explanation_human.strip().lower() if explanation_human else ""
+    for reason in reasons:
+        clean_reason = _humanize_reason(reason)
+        if not clean_reason:
+            continue
+        if seen_reason and clean_reason.strip().lower() == seen_reason:
+            continue
+        extra_reasons.append(clean_reason)
+warnings = row.get("warnings", [])
+advisor_summary = row.get("advisor_summary", pd.NA)
+context_items = []
+advisor_confidence = row.get("advisor_confidence", pd.NA)
+if pd.notna(advisor_confidence) and str(advisor_confidence).strip() and str(advisor_confidence).lower() != "nan":
+    context_items.append(("Confidence", str(advisor_confidence)))
+advisor_used_llm = row.get("advisor_used_llm", pd.NA)
+if pd.notna(advisor_used_llm) and str(advisor_used_llm).strip() and str(advisor_used_llm).lower() != "nan":
+    review_method = "AI-assisted review" if str(advisor_used_llm).strip().lower() in {"1", "true", "yes"} else "Rule-based review"
+    context_items.append(("Review method", review_method))
+advisor_model = row.get("advisor_model", pd.NA)
+if pd.notna(advisor_model) and str(advisor_model).strip() and str(advisor_model).lower() != "nan":
+    context_items.append(("Model", str(advisor_model)))
+rationale_summary = ""
+if pd.notna(advisor_summary) and str(advisor_summary).strip():
+    rationale_summary = str(advisor_summary).strip()
+elif extra_reasons:
+    rationale_summary = extra_reasons[0]
+elif warnings:
+    rationale_summary = _humanize_reason(warnings[0])
+
+hero_story_keys = set()
+for value in [explanation_human, action_text]:
+    key = _clean_text(value).strip().lower() if value else ""
+    if key:
+        hero_story_keys.add(key)
+
+rationale_points = []
+rationale_seen = set(hero_story_keys)
+for candidate in extra_reasons[:4]:
+    key = _clean_text(candidate).strip().lower() if candidate else ""
+    if key and key not in rationale_seen:
+        rationale_points.append(candidate)
+        rationale_seen.add(key)
+
+if not rationale_points and rationale_summary:
+    summary_key = _clean_text(rationale_summary).strip().lower()
+    if summary_key and summary_key not in rationale_seen:
+        rationale_points.append(rationale_summary)
+        rationale_seen.add(summary_key)
+
+note_points = []
+for warning in warnings[:3]:
+    clean_warning = _humanize_reason(warning)
+    key = _clean_text(clean_warning).strip().lower() if clean_warning else ""
+    if key and key not in rationale_seen:
+        note_points.append(clean_warning)
+        rationale_seen.add(key)
+
+diagnostic_points = []
+diagnostic_seen = set()
+for signal in _build_decision_signal_bits(row):
+    key = _clean_text(signal).strip().lower()
+    if key and key not in diagnostic_seen:
+        diagnostic_points.append(signal)
+        diagnostic_seen.add(key)
+
+hero_why_points = diagnostic_points[:3]
+support_points = []
+support_seen = set(hero_story_keys)
+for item in hero_why_points:
+    key = _clean_text(item).strip().lower()
+    if key:
+        support_seen.add(key)
+
+for candidate in diagnostic_points[3:] + rationale_points + note_points:
+    key = _clean_text(candidate).strip().lower() if candidate else ""
+    if key and key not in support_seen:
+        support_points.append(candidate)
+        support_seen.add(key)
+
+action_options = _build_action_options(row, action_text)
 
 st.divider()
-has_support = bool(extra_reasons or warnings or meta_bits or (pd.notna(advisor_summary) and str(advisor_summary).strip()))
+has_support = bool(support_points or context_items)
 if has_support:
-    st.markdown("### Decision rationale")
+    st.markdown("### Why this needs action")
     support_cols = st.columns([1.2, 1.0], gap="large")
     with support_cols[0]:
-        if pd.notna(advisor_summary) and str(advisor_summary).strip():
-            st.markdown("**Advisor perspective**")
-            st.write(str(advisor_summary))
-        if extra_reasons:
-            st.markdown("**Expanded rationale**")
-            for reason in extra_reasons[:3]:
+        if support_points:
+            st.markdown("**Key signals**")
+            for reason in support_points[:4]:
                 st.write(f"- {reason}")
     with support_cols[1]:
-        if isinstance(warnings, list) and warnings:
-            st.markdown("**Supporting notes**")
-            for warning in warnings[:3]:
-                st.write(f"- {_humanize_reason(warning)}")
-        if meta_bits:
-            st.markdown("**Decision context**")
-            st.caption(" | ".join(meta_bits))
+        if context_items:
+            st.markdown("**Review metadata**")
+            context_html = "".join(
+                f"<div class='snapshot-item'><div class='snapshot-label'>{label}</div><div class='snapshot-value'>{value}</div></div>"
+                for label, value in context_items
+            )
+            st.markdown(f"<div class='context-grid'>{context_html}</div>", unsafe_allow_html=True)
+
+if action_options:
+    st.divider()
+    st.markdown("### Actions to consider")
+    for option in action_options[:4]:
+        st.write(f"- {option}")
 
 st.divider()
 st.markdown("### Scenario explorer")
@@ -1758,36 +2129,71 @@ else:
 analysis_sum = row.get("analysis_summary", pd.NA)
 ins = row.get("analysis_insights", [])
 acts = row.get("analysis_suggested_actions", [])
+appendix_seen = set(support_seen)
+for item in hero_why_points + support_points + action_options:
+    key = _clean_text(item).strip().lower() if item else ""
+    if key:
+        appendix_seen.add(key)
+appendix_summary = ""
+if pd.notna(analysis_sum) and str(analysis_sum).strip():
+    summary_text = str(analysis_sum).strip()
+    summary_key = _clean_text(summary_text).strip().lower()
+    if summary_key and summary_key not in appendix_seen:
+        appendix_summary = summary_text
+        appendix_seen.add(summary_key)
+
+appendix_insights = []
+if isinstance(ins, list):
+    for item in ins:
+        clean_item = _humanize_reason(item)
+        key = _clean_text(clean_item).strip().lower() if clean_item else ""
+        if key and key not in appendix_seen:
+            appendix_insights.append(clean_item)
+            appendix_seen.add(key)
+
+appendix_actions = []
+if isinstance(acts, list):
+    for item in acts:
+        clean_item = str(item).strip()
+        key = _clean_text(clean_item).strip().lower() if clean_item else ""
+        if key and key not in appendix_seen:
+            appendix_actions.append(clean_item)
+            appendix_seen.add(key)
+
 has_context = bool(
-    (pd.notna(analysis_sum) and str(analysis_sum).strip())
-    or (isinstance(ins, list) and ins)
-    or (isinstance(acts, list) and acts)
+    appendix_summary
+    or appendix_insights
+    or appendix_actions
+    or (isinstance(row.get("provenance", {}), dict) and row.get("provenance", {}))
+    or (isinstance(row.get("execution_metadata", {}), dict) and row.get("execution_metadata", {}))
 )
 if has_context or developer_mode:
     with st.expander("Reference details", expanded=False):
-        if pd.notna(analysis_sum) and str(analysis_sum).strip():
-            st.write(str(analysis_sum))
+        st.caption("Technical appendix for deeper analytical backup and execution context.")
+        if appendix_summary:
+            st.markdown("**Stored analysis note**")
+            st.markdown(f"<div class='appendix-card'>{appendix_summary}</div>", unsafe_allow_html=True)
 
-        if isinstance(ins, list) and ins:
-            st.markdown("**Supporting insights**")
-            for it in ins:
-                st.write(f"- {_humanize_reason(it)}")
+        if appendix_insights:
+            st.markdown("**Analyst notes**")
+            for it in appendix_insights[:5]:
+                st.write(f"- {it}")
 
-        if isinstance(acts, list) and acts:
-            st.markdown("**Additional suggested actions**")
-            for it in acts:
+        if appendix_actions:
+            st.markdown("**Additional actions considered**")
+            for it in appendix_actions[:5]:
                 st.write(f"- {it}")
 
         provenance = row.get("provenance", {})
         execution_metadata = row.get("execution_metadata", {})
         if isinstance(provenance, dict) and provenance:
-            st.markdown("**Metric provenance**")
+            st.markdown("**Data provenance**")
             st.json(provenance)
         if isinstance(execution_metadata, dict) and execution_metadata:
-            st.markdown("**Technical metadata**")
+            st.markdown("**Execution details**")
             st.json(execution_metadata)
         if developer_mode:
-            st.markdown("**Raw row JSON**")
+            st.markdown("**Raw record**")
             st.code(json.dumps(row.to_dict(), indent=2, default=str), language="json")
 
 with st.expander("Portfolio overview", expanded=False):
