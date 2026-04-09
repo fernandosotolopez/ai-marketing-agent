@@ -350,79 +350,63 @@ def _build_action_options(row: pd.Series, primary_action: str) -> List[str]:
     return options
 
 
-def make_hero_cpa_visual(row: pd.Series) -> go.Figure:
+def build_hero_impact_data(row: pd.Series) -> Dict[str, str]:
     cpa = _safe_float(row.get("cpa"))
     target_cpa = _safe_float(row.get("target_cpa"))
+    cpa_trend = _safe_float(row.get("cpa_trend_7d"))
 
     if np.isnan(cpa) and np.isnan(target_cpa):
-        fig = go.Figure()
-        fig.add_annotation(
-            text="No CPA data available",
-            x=0.5,
-            y=0.5,
-            xref="paper",
-            yref="paper",
-            showarrow=False,
-            font={"size": 16, "color": "rgba(248,250,252,0.72)"},
-        )
-        fig.update_layout(
-            height=240,
-            margin=dict(l=0, r=0, t=0, b=0),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            xaxis={"visible": False},
-            yaxis={"visible": False},
-        )
-        return fig
+        return {
+            "delta_value": "--",
+            "delta_label": "target unavailable",
+            "current_cpa": "—",
+            "target_cpa": "—",
+            "trend_value": "—",
+        }
 
-    max_val = max(cpa if not np.isnan(cpa) else 0, target_cpa if not np.isnan(target_cpa) else 0, 1.0)
-    bar_color = "#f59e0b"
-    if not np.isnan(cpa) and not np.isnan(target_cpa):
-        bar_color = "#fb7185" if cpa > target_cpa else "#34d399"
+    if pd.notna(target_cpa) and float(target_cpa) > 0 and pd.notna(cpa):
+        delta_pct = (float(cpa) / float(target_cpa) - 1) * 100
+        delta_value = f"{delta_pct:+.0f}%"
+        delta_label = "above target" if delta_pct >= 0 else "below target"
+    else:
+        delta_value = "--"
+        delta_label = "target unavailable"
 
-    threshold_value = float(target_cpa) if not np.isnan(target_cpa) else max_val
-    fig = go.Figure(
-        go.Indicator(
-            mode="number+gauge",
-            value=0.0 if np.isnan(cpa) else float(cpa),
-            number={"font": {"size": 34, "color": "#f8fafc"}},
-            title={"text": "<span style='font-size:12px;color:rgba(248,250,252,0.65)'>ACTUAL CPA</span>"},
-            gauge={
-                "shape": "bullet",
-                "axis": {"range": [None, max_val * 1.25], "visible": False},
-                "bar": {"color": bar_color, "thickness": 0.5},
-                "bgcolor": "rgba(148,163,184,0.12)",
-                "steps": [{"range": [0, max_val * 1.25], "color": "rgba(148,163,184,0.12)"}],
-                "threshold": {
-                    "line": {"color": "rgba(248,250,252,0.95)", "width": 3},
-                    "thickness": 0.95,
-                    "value": threshold_value,
-                },
-            },
-        )
-    )
-    fig.add_annotation(
-        text=(
-            f"Target CPA {target_cpa:.2f}"
-            if not np.isnan(target_cpa)
-            else "Target CPA unavailable"
-        ),
-        x=0,
-        y=0.02,
-        xref="paper",
-        yref="paper",
-        xanchor="left",
-        yanchor="bottom",
-        showarrow=False,
-        font={"size": 12, "color": "rgba(248,250,252,0.72)"},
-    )
-    fig.update_layout(
-        height=240,
-        margin=dict(l=0, r=0, t=20, b=10),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-    )
-    return fig
+    trend_value = "—"
+    if pd.notna(cpa_trend):
+        trend_value = _format_pct(cpa_trend)
+
+    return {
+        "delta_value": delta_value,
+        "delta_label": delta_label,
+        "current_cpa": "—" if np.isnan(cpa) else f"{float(cpa):.2f}",
+        "target_cpa": "—" if np.isnan(target_cpa) else f"{float(target_cpa):.2f}",
+        "trend_value": trend_value,
+    }
+
+
+def render_hero_impact_card(data: Dict[str, str]) -> None:
+    with st.container(border=True):
+        st.caption("CPA gap vs target")
+        _, center_col, _ = st.columns([0.8, 1.3, 0.8], gap="small")
+        with center_col:
+            st.markdown(f"# :red[{data['delta_value']}]")
+            st.caption(data["delta_label"])
+
+        _, metrics_col, _ = st.columns([0.18, 1.64, 0.18], gap="small")
+        with metrics_col:
+            pair_col, trend_col = st.columns([1.55, 0.72], gap="medium")
+            with pair_col:
+                fact_1, fact_2 = st.columns(2, gap="small")
+                with fact_1:
+                    st.caption("Current CPA")
+                    st.markdown(f"**{data['current_cpa']}**")
+                with fact_2:
+                    st.caption("Target CPA")
+                    st.markdown(f"**{data['target_cpa']}**")
+            with trend_col:
+                st.caption("7d CPA trend")
+                st.caption(data["trend_value"])
 
 
 def sort_campaigns_for_review(df: pd.DataFrame) -> pd.DataFrame:
@@ -1586,6 +1570,43 @@ st.markdown(
         opacity: 0.78;
         margin-bottom: 0.3rem;
     }
+    .hero-impact-card {
+        padding: 0.95rem 0.25rem 0.65rem 0.25rem;
+        text-align: center;
+        min-height: 170px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+    }
+    .hero-impact-value {
+        font-size: 3rem;
+        font-weight: 700;
+        line-height: 0.98;
+        margin-bottom: 0.25rem;
+        letter-spacing: -0.03em;
+    }
+    .hero-impact-value.alert {
+        color: #fb7185;
+    }
+    .hero-impact-value.good {
+        color: #34d399;
+    }
+    .hero-impact-value.neutral {
+        color: rgba(248, 250, 252, 0.78);
+    }
+    .hero-impact-label {
+        font-size: 0.95rem;
+        line-height: 1.2;
+        opacity: 0.82;
+        margin-bottom: 0.75rem;
+    }
+    .hero-impact-support {
+        font-size: 0.76rem;
+        line-height: 1.2;
+        opacity: 0.64;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
     .hero-selector-shell {
         border: 1px solid rgba(128, 128, 128, 0.14);
         border-radius: 16px;
@@ -1934,16 +1955,8 @@ with hero_left:
         unsafe_allow_html=True,
     )
 with hero_right:
-    st.markdown(
-        """
-        <div class="hero-decision-panel">
-            <div class="hero-visual-title">Actual CPA vs target CPA</div>
-            <div class="hero-visual-caption">The bar shows current CPA. The vertical marker shows the target threshold.</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.plotly_chart(make_hero_cpa_visual(row), use_container_width=True)
+    impact_data = build_hero_impact_data(row)
+    render_hero_impact_card(impact_data)
 df_queue = sorted_df.head(4).copy()
 switcher_options = []
 switcher_labels = {}
