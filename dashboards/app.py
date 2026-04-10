@@ -387,26 +387,32 @@ def build_hero_impact_data(row: pd.Series) -> Dict[str, str]:
 
 def render_hero_impact_card(data: Dict[str, str]) -> None:
     with st.container(border=True):
-        st.caption("CPA gap vs target")
-        _, center_col, _ = st.columns([0.8, 1.3, 0.8], gap="small")
-        with center_col:
-            st.markdown(f"# :red[{data['delta_value']}]")
-            st.caption(data["delta_label"])
-
-        _, metrics_col, _ = st.columns([0.18, 1.64, 0.18], gap="small")
-        with metrics_col:
-            pair_col, trend_col = st.columns([1.55, 0.72], gap="medium")
-            with pair_col:
-                fact_1, fact_2 = st.columns(2, gap="small")
-                with fact_1:
-                    st.caption("Current CPA")
-                    st.markdown(f"**{data['current_cpa']}**")
-                with fact_2:
-                    st.caption("Target CPA")
-                    st.markdown(f"**{data['target_cpa']}**")
-            with trend_col:
-                st.caption("7d CPA trend")
-                st.caption(data["trend_value"])
+        st.markdown(
+            f"""
+            <div class="hero-impact-shell">
+                <div class="hero-impact-title">CPA gap vs target</div>
+                <div class="hero-impact-hero">
+                    <div class="hero-impact-value alert">{data['delta_value']}</div>
+                    <div class="hero-impact-label">{data['delta_label']}</div>
+                </div>
+                <div class="hero-impact-metrics">
+                    <div class="hero-impact-metric">
+                        <div class="hero-impact-metric-label">Current CPA</div>
+                        <div class="hero-impact-metric-value">{data['current_cpa']}</div>
+                    </div>
+                    <div class="hero-impact-metric">
+                        <div class="hero-impact-metric-label">Target CPA</div>
+                        <div class="hero-impact-metric-value">{data['target_cpa']}</div>
+                    </div>
+                    <div class="hero-impact-metric">
+                        <div class="hero-impact-metric-label">7d CPA trend</div>
+                        <div class="hero-impact-metric-value tertiary">{data['trend_value']}</div>
+                    </div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def sort_campaigns_for_review(df: pd.DataFrame) -> pd.DataFrame:
@@ -1570,19 +1576,36 @@ st.markdown(
         opacity: 0.78;
         margin-bottom: 0.3rem;
     }
-    .hero-impact-card {
-        padding: 0.95rem 0.25rem 0.65rem 0.25rem;
-        text-align: center;
-        min-height: 170px;
+    .hero-impact-shell {
+        min-height: 214px;
         display: flex;
         flex-direction: column;
+        justify-content: space-between;
+        padding: 0.55rem 1.8rem 0.85rem 1.8rem;
+    }
+    .hero-impact-title {
+        font-size: 0.76rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        opacity: 0.68;
+        text-align: left;
+        margin-bottom: 0.35rem;
+    }
+    .hero-impact-hero {
+        flex: 1.12;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
         justify-content: center;
+        text-align: center;
+        min-height: 126px;
+        padding: 0.6rem 0 0.85rem 0;
     }
     .hero-impact-value {
-        font-size: 3rem;
+        font-size: 3.38rem;
         font-weight: 700;
-        line-height: 0.98;
-        margin-bottom: 0.25rem;
+        line-height: 0.9;
+        margin-bottom: 0.08rem;
         letter-spacing: -0.03em;
     }
     .hero-impact-value.alert {
@@ -1595,24 +1618,119 @@ st.markdown(
         color: rgba(248, 250, 252, 0.78);
     }
     .hero-impact-label {
-        font-size: 0.95rem;
-        line-height: 1.2;
-        opacity: 0.82;
-        margin-bottom: 0.75rem;
+        font-size: 0.88rem;
+        line-height: 1.08;
+        opacity: 0.78;
     }
-    .hero-impact-support {
-        font-size: 0.76rem;
-        line-height: 1.2;
-        opacity: 0.64;
+    .hero-impact-metrics {
+        display: grid;
+        grid-template-columns: 1.05fr 1.05fr 0.78fr;
+        gap: 0.62rem;
+        align-items: end;
+        width: 72%;
+        margin: 0 auto;
+        padding-top: 0.82rem;
+        padding-left: 0.32rem;
+        padding-right: 0.32rem;
+        border-top: 1px solid rgba(128, 128, 128, 0.12);
+    }
+    .hero-impact-metric {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+    }
+    .hero-impact-metric-label {
+        font-size: 0.69rem;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
+        letter-spacing: 0.04em;
+        opacity: 0.56;
+        margin-bottom: 0.12rem;
+        line-height: 1.15;
+    }
+    .hero-impact-metric-value {
+        font-size: 0.96rem;
+        font-weight: 550;
+        line-height: 1.08;
+    }
+    .hero-impact-metric-value.tertiary {
+        font-size: 0.78rem;
+        font-weight: 500;
+        opacity: 0.6;
+        padding-bottom: 0.02rem;
     }
     .hero-selector-shell {
-        border: 1px solid rgba(128, 128, 128, 0.14);
-        border-radius: 16px;
-        padding: 0.78rem 0.95rem 0.35rem 0.95rem;
-        background: rgba(250, 250, 250, 0.014);
-        margin: 0.2rem 0 1rem 0;
+        padding: 0.12rem 0 0 0;
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+        margin: 0.56rem 0 0.18rem 0;
+    }
+    .hero-selector-shell .hero-console-section-title {
+        margin-bottom: 0.14rem;
+        opacity: 0.66;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+    }
+    .hero-selector-shell .hero-console-switcher-copy {
+        font-size: 0.82rem;
+        line-height: 1.28;
+        opacity: 0.64;
+        margin-bottom: 0.12rem;
+        max-width: 36rem;
+    }
+    .main .block-container [data-testid="stRadio"] {
+        margin-top: 0.08rem;
+        margin-bottom: 0.72rem;
+    }
+    .main .block-container [data-testid="stRadio"] > div {
+        gap: 0.08rem;
+    }
+    .main .block-container [data-testid="stRadio"] div[role="radiogroup"] {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 1.1rem;
+        overflow-x: auto;
+        align-items: flex-end;
+        padding: 0.02rem 0 0.18rem 0;
+        border-bottom: 1px solid rgba(128, 128, 128, 0.12);
+        scrollbar-width: none;
+    }
+    .main .block-container [data-testid="stRadio"] div[role="radiogroup"]::-webkit-scrollbar {
+        display: none;
+    }
+    .main .block-container [data-testid="stRadio"] label[data-baseweb="radio"] {
+        margin: 0;
+        padding: 0.02rem 0 0.46rem 0;
+        min-height: auto !important;
+        background: transparent !important;
+        border: 0 !important;
+        border-bottom: 2px solid transparent !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        flex: 0 0 auto;
+    }
+    .main .block-container [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child {
+        display: none;
+    }
+    .main .block-container [data-testid="stRadio"] label[data-baseweb="radio"] p {
+        margin: 0;
+        font-size: 0.86rem;
+        line-height: 1.18;
+        color: rgba(248, 250, 252, 0.6);
+        white-space: nowrap;
+        transition: color 120ms ease, opacity 120ms ease, transform 120ms ease;
+    }
+    .main .block-container [data-testid="stRadio"] label[data-baseweb="radio"]:hover p {
+        color: rgba(248, 250, 252, 0.84);
+    }
+    .main .block-container [data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) {
+        border-bottom-color: rgba(248, 250, 252, 0.9) !important;
+    }
+    .main .block-container [data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) p {
+        color: rgba(248, 250, 252, 0.96);
+        font-weight: 600;
+        transform: translateY(-1px);
     }
     .snapshot-grid {
         display: grid;
