@@ -905,38 +905,45 @@ def make_scatter_ratio(df: pd.DataFrame) -> go.Figure:
       X = CPA / target_CPA (1.0 is on target)
       Y = ROAS (1.0 is break-even pre-LTV)
     """
+    plot_df = df.copy()
+    plot_df["review_label"] = plot_df["stance"].map(_format_decision_label)
+    plot_df["priority_label"] = plot_df["severity"].map(lambda value: _format_risk_label(value).title())
+    plot_df["portfolio_note"] = plot_df["decision_explanation"].map(lambda value: _humanize_reason(_short_reason(value, max_len=90)))
     fig = px.scatter(
-        df,
+        plot_df,
         x="cpa_ratio",
         y="roas",
         color="severity",
-        hover_data={
-            "campaign_id": True,
-            "run_id": True,
-            "stance": True,
-            "severity": True,
-            "cpa": ":.2f",
-            "target_cpa": ":.2f",
-            "cpa_ratio": ":.2f",
-            "roas": ":.2f",
-            "cpa_trend_7d": ":.2f",
-            "roas_trend_7d": ":.2f",
-            "days_active": True,
-            "decision_explanation": True,
-            "warning_count": True,
-        },
+        custom_data=["campaign_id", "review_label", "priority_label", "cpa_ratio", "roas", "portfolio_note"],
+        color_discrete_map={"high": "#fb7185", "medium": "#f2c27b", "low": "#93c5fd"},
     )
 
-    fig.add_vline(x=1.0, line_width=1, opacity=0.6)
-    fig.add_hline(y=1.0, line_width=1, opacity=0.6)
+    fig.add_vline(x=1.0, line_width=1, line_dash="dot", line_color="rgba(148,163,184,0.42)")
+    fig.add_hline(y=1.0, line_width=1, line_dash="dot", line_color="rgba(148,163,184,0.42)")
 
     fig.update_layout(
-        height=420,
-        margin=dict(l=10, r=10, t=60, b=10),
+        height=390,
+        margin=dict(l=10, r=10, t=18, b=8),
         legend_title_text="Priority",
-        xaxis_title="Efficiency vs target CPA (1.0 = on target)",
-        yaxis_title="ROAS (1.0 = break-even before lifetime value assumptions)",
+        xaxis_title="Efficiency vs target CPA",
+        yaxis_title="ROAS",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
     )
+    fig.update_traces(
+        marker=dict(size=11, line=dict(width=1, color="rgba(15,23,42,0.85)")),
+        hovertemplate=(
+            "<b>%{customdata[0]}</b><br>"
+            "%{customdata[1]} | %{customdata[2]} priority<br>"
+            "Efficiency vs target: %{customdata[3]:.2f}x<br>"
+            "ROAS: %{customdata[4]:.2f}<br>"
+            "%{customdata[5]}"
+            "<extra></extra>"
+        ),
+    )
+    fig.update_xaxes(showgrid=False, zeroline=False)
+    fig.update_yaxes(gridcolor="rgba(148,163,184,0.12)", zeroline=False)
     return fig
 
 
@@ -1843,6 +1850,58 @@ st.markdown(
     .action-list-refined li:last-child {
         padding-bottom: 0;
     }
+    .portfolio-kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 0.72rem;
+        margin-bottom: 0.68rem;
+    }
+    .portfolio-kpi-card {
+        border: 1px solid rgba(128, 128, 128, 0.1);
+        border-radius: 14px;
+        padding: 0.78rem 0.86rem;
+        background: rgba(250, 250, 250, 0.012);
+    }
+    .portfolio-kpi-label {
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        opacity: 0.62;
+        margin-bottom: 0.18rem;
+    }
+    .portfolio-kpi-value {
+        font-size: 1.05rem;
+        font-weight: 650;
+        line-height: 1.16;
+    }
+    .portfolio-overview-note {
+        font-size: 0.84rem;
+        line-height: 1.32;
+        opacity: 0.7;
+        margin-bottom: 0.82rem;
+        max-width: 42rem;
+    }
+    .portfolio-map-shell {
+        border: 1px solid rgba(128, 128, 128, 0.1);
+        border-radius: 14px;
+        padding: 0.9rem 0.96rem 0.5rem 0.96rem;
+        background: rgba(250, 250, 250, 0.01);
+        margin-top: 0.2rem;
+    }
+    .portfolio-map-title {
+        font-size: 0.76rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        opacity: 0.62;
+        margin-bottom: 0.28rem;
+    }
+    .portfolio-map-caption {
+        font-size: 0.82rem;
+        line-height: 1.28;
+        opacity: 0.62;
+        margin-bottom: 0.48rem;
+        max-width: 40rem;
+    }
     .scenario-intro {
         font-size: 0.88rem;
         line-height: 1.38;
@@ -1909,6 +1968,13 @@ st.markdown(
         padding: 0.8rem 0.9rem;
         background: rgba(250, 250, 250, 0.012);
         margin-bottom: 0.8rem;
+    }
+    .appendix-note {
+        font-size: 0.82rem;
+        line-height: 1.3;
+        opacity: 0.68;
+        margin-bottom: 0.55rem;
+        max-width: 42rem;
     }
     .stButton > button {
         border-radius: 12px;
@@ -2491,7 +2557,7 @@ has_context = bool(
 if has_context or developer_mode:
     st.markdown('<div class="scenario-transition"></div>', unsafe_allow_html=True)
     with st.expander("Reference details", expanded=False):
-        st.caption("Technical appendix for deeper analytical backup and execution context.")
+        st.markdown('<div class="appendix-note">Technical appendix for deeper analytical backup and execution context.</div>', unsafe_allow_html=True)
         if appendix_summary:
             st.markdown("**Stored analysis note**")
             st.markdown(f"<div class='appendix-card'>{appendix_summary}</div>", unsafe_allow_html=True)
@@ -2519,17 +2585,46 @@ if has_context or developer_mode:
             st.code(json.dumps(row.to_dict(), indent=2, default=str), language="json")
 
 with st.expander("Portfolio overview", expanded=False):
-    k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("Campaigns in review", f"{campaigns_count}")
-    k2.metric("Escalate now", f"{escalate_count}")
-    k3.metric("High priority", f"{high_count}")
-    k4.metric("Below break-even", f"{roas_lt_1}")
-    k5.metric("Avg efficiency vs target", f"{avg_cpa_ratio:.2f}" if campaigns_count else "—")
-    st.caption("Portfolio scan for broader patterns, not campaign-level decision making.")
-    with st.expander("Performance map", expanded=False):
-        st.caption("Compare efficiency versus profitability across the filtered portfolio.")
-        fig = make_scatter_ratio(df_f)
-        st.plotly_chart(fig, use_container_width=True)
+    portfolio_kpis_html = f"""
+    <div class="portfolio-kpi-grid">
+        <div class="portfolio-kpi-card">
+            <div class="portfolio-kpi-label">Campaigns in review</div>
+            <div class="portfolio-kpi-value">{campaigns_count}</div>
+        </div>
+        <div class="portfolio-kpi-card">
+            <div class="portfolio-kpi-label">Escalate now</div>
+            <div class="portfolio-kpi-value">{escalate_count}</div>
+        </div>
+        <div class="portfolio-kpi-card">
+            <div class="portfolio-kpi-label">High priority</div>
+            <div class="portfolio-kpi-value">{high_count}</div>
+        </div>
+        <div class="portfolio-kpi-card">
+            <div class="portfolio-kpi-label">Below break-even</div>
+            <div class="portfolio-kpi-value">{roas_lt_1}</div>
+        </div>
+        <div class="portfolio-kpi-card">
+            <div class="portfolio-kpi-label">Avg efficiency vs target</div>
+            <div class="portfolio-kpi-value">{f"{avg_cpa_ratio:.2f}" if campaigns_count else "—"}</div>
+        </div>
+    </div>
+    """
+    st.markdown(portfolio_kpis_html, unsafe_allow_html=True)
+    st.markdown(
+        '<div class="portfolio-overview-note">Portfolio scan for broader patterns, not campaign-level decision making.</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        """
+        <div class="portfolio-map-shell">
+            <div class="portfolio-map-title">Performance map</div>
+            <div class="portfolio-map-caption">Compare efficiency versus profitability across the filtered portfolio.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    fig = make_scatter_ratio(df_f)
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 with st.expander("Campaign table", expanded=False):
     df_all = build_campaign_display_df(df_f)
