@@ -1765,6 +1765,72 @@ st.markdown(
         gap: 0.75rem 1rem;
         margin-top: 0.35rem;
     }
+    .reasoning-card {
+        border: 1px solid rgba(128, 128, 128, 0.12);
+        border-radius: 14px;
+        padding: 0.88rem 0.94rem;
+        background: rgba(250, 250, 250, 0.014);
+        height: 100%;
+    }
+    .reasoning-card.primary {
+        background: linear-gradient(180deg, rgba(250, 250, 250, 0.024), rgba(250, 250, 250, 0.01));
+    }
+    .reasoning-card.metadata {
+        padding: 0.78rem 0.86rem;
+        background: rgba(250, 250, 250, 0.012);
+    }
+    .reasoning-kicker {
+        font-size: 0.76rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        opacity: 0.66;
+        margin-bottom: 0.34rem;
+    }
+    .reasoning-list {
+        margin: 0.08rem 0 0 0;
+        padding-left: 1rem;
+    }
+    .reasoning-list li {
+        margin-bottom: 0.4rem;
+        line-height: 1.38;
+    }
+    .reasoning-list li:last-child {
+        margin-bottom: 0;
+    }
+    .metadata-grid-refined {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.52rem;
+        width: 92%;
+        margin-top: 0.08rem;
+    }
+    .metadata-item-refined {
+        min-width: 0;
+    }
+    .action-shell {
+        border: 1px solid rgba(128, 128, 128, 0.11);
+        border-radius: 14px;
+        padding: 0.82rem 0.94rem;
+        background: rgba(250, 250, 250, 0.013);
+        margin-bottom: 0.42rem;
+    }
+    .action-list-refined {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+    }
+    .action-list-refined li {
+        padding: 0.46rem 0;
+        line-height: 1.38;
+        border-top: 1px solid rgba(128, 128, 128, 0.08);
+    }
+    .action-list-refined li:first-child {
+        border-top: 0;
+        padding-top: 0;
+    }
+    .action-list-refined li:last-child {
+        padding-bottom: 0;
+    }
     .appendix-card {
         border: 1px solid rgba(128, 128, 128, 0.12);
         border-radius: 12px;
@@ -2206,26 +2272,47 @@ st.divider()
 has_support = bool(support_points or context_items)
 if has_support:
     st.markdown("### Why this needs action")
+    signals_html = "".join(f"<li>{reason}</li>" for reason in support_points[:4])
+    metadata_html = "".join(
+        f"<div class='metadata-item-refined'><div class='snapshot-label'>{label}</div><div class='snapshot-value'>{value}</div></div>"
+        for label, value in context_items
+    )
     support_cols = st.columns([1.2, 1.0], gap="large")
     with support_cols[0]:
         if support_points:
-            st.markdown("**Key signals**")
-            for reason in support_points[:4]:
-                st.write(f"- {reason}")
+            st.markdown(
+                f"""
+                <div class="reasoning-card primary">
+                    <div class="reasoning-kicker">Key signals</div>
+                    <ul class="reasoning-list">{signals_html}</ul>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
     with support_cols[1]:
         if context_items:
-            st.markdown("**Review metadata**")
-            context_html = "".join(
-                f"<div class='snapshot-item'><div class='snapshot-label'>{label}</div><div class='snapshot-value'>{value}</div></div>"
-                for label, value in context_items
+            st.markdown(
+                f"""
+                <div class="reasoning-card metadata">
+                    <div class="reasoning-kicker">Review metadata</div>
+                    <div class="metadata-grid-refined">{metadata_html}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
-            st.markdown(f"<div class='context-grid'>{context_html}</div>", unsafe_allow_html=True)
 
 if action_options:
     st.divider()
     st.markdown("### Actions to consider")
-    for option in action_options[:4]:
-        st.write(f"- {option}")
+    action_html = "".join(f"<li>{option}</li>" for option in action_options[:4])
+    st.markdown(
+        f"""
+        <div class="action-shell">
+            <ul class="action-list-refined">{action_html}</ul>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 st.divider()
 st.markdown("### Scenario explorer")
