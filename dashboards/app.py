@@ -966,20 +966,32 @@ def scenarios_to_df(scenarios: List[Dict[str, Any]]) -> pd.DataFrame:
 def make_what_if_charts(df_whatif: pd.DataFrame) -> Tuple[go.Figure, go.Figure]:
     fig_roas = px.line(df_whatif, x="budget_multiplier", y="projected_ROAS", markers=True)
     fig_roas.update_layout(
-        height=260,
-        margin=dict(l=10, r=10, t=30, b=10),
-        xaxis_title="Budget change multiplier",
-        yaxis_title="Illustrative ROAS",
+        height=280,
+        margin=dict(l=8, r=8, t=18, b=8),
+        xaxis_title="Budget multiplier",
+        yaxis_title="ROAS",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        showlegend=False,
     )
-    fig_roas.add_hline(y=1.0, line_width=1, opacity=0.6)
+    fig_roas.add_hline(y=1.0, line_width=1, line_dash="dot", line_color="rgba(148,163,184,0.45)")
+    fig_roas.update_traces(line_color="#93c5fd", line_width=2.4, marker_size=6)
+    fig_roas.update_xaxes(showgrid=False, zeroline=False)
+    fig_roas.update_yaxes(gridcolor="rgba(148,163,184,0.12)", zeroline=False)
 
     fig_cpa = px.line(df_whatif, x="budget_multiplier", y="projected_CPA", markers=True)
     fig_cpa.update_layout(
-        height=260,
-        margin=dict(l=10, r=10, t=30, b=10),
-        xaxis_title="Budget change multiplier",
-        yaxis_title="Illustrative CPA",
+        height=280,
+        margin=dict(l=8, r=8, t=18, b=8),
+        xaxis_title="Budget multiplier",
+        yaxis_title="CPA",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        showlegend=False,
     )
+    fig_cpa.update_traces(line_color="#f2c27b", line_width=2.4, marker_size=6)
+    fig_cpa.update_xaxes(showgrid=False, zeroline=False)
+    fig_cpa.update_yaxes(gridcolor="rgba(148,163,184,0.12)", zeroline=False)
     return fig_roas, fig_cpa
 
 
@@ -1831,6 +1843,66 @@ st.markdown(
     .action-list-refined li:last-child {
         padding-bottom: 0;
     }
+    .scenario-intro {
+        font-size: 0.88rem;
+        line-height: 1.38;
+        opacity: 0.76;
+        margin-bottom: 0.62rem;
+        max-width: 44rem;
+    }
+    .scenario-heading {
+        font-size: 1.28rem;
+        font-weight: 600;
+        line-height: 1.2;
+        margin-bottom: 0.3rem;
+    }
+    .scenario-shell {
+        border: 1px solid rgba(128, 128, 128, 0.12);
+        border-radius: 16px;
+        padding: 0.95rem 1rem;
+        background: rgba(250, 250, 250, 0.012);
+        margin-top: 0.15rem;
+        margin-bottom: 0.82rem;
+    }
+    .scenario-panel {
+        border: 1px solid rgba(128, 128, 128, 0.1);
+        border-radius: 14px;
+        padding: 0.82rem 0.88rem;
+        background: rgba(250, 250, 250, 0.01);
+        height: 100%;
+    }
+    .scenario-panel-title {
+        font-size: 0.76rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        opacity: 0.62;
+        margin-bottom: 0.32rem;
+    }
+    .scenario-panel-caption {
+        font-size: 0.82rem;
+        line-height: 1.28;
+        opacity: 0.62;
+        margin-bottom: 0.72rem;
+    }
+    .scenario-chart-stack {
+        margin-top: 0.08rem;
+    }
+    .scenario-chart-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.9rem;
+    }
+    .scenario-table-note {
+        font-size: 0.78rem;
+        line-height: 1.28;
+        opacity: 0.56;
+        margin-top: 0.68rem;
+        margin-bottom: 0.42rem;
+    }
+    .scenario-transition {
+        margin-top: 0.62rem;
+        margin-bottom: 1.05rem;
+    }
     .appendix-card {
         border: 1px solid rgba(128, 128, 128, 0.12);
         border-radius: 12px;
@@ -2315,9 +2387,10 @@ if action_options:
     )
 
 st.divider()
-st.markdown("### Scenario explorer")
-st.caption(
-    "These scenarios are illustrative decision-support views based on simplified assumptions. They are directional, not predictive forecasts."
+st.markdown('<div class="scenario-heading">Scenario explorer</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="scenario-intro">These scenarios are illustrative decision-support views based on simplified assumptions. They are directional, not predictive forecasts.</div>',
+    unsafe_allow_html=True,
 )
 scenarios = row.get("scenarios", [])
 df_whatif = scenarios_to_df(scenarios if isinstance(scenarios, list) else [])
@@ -2333,16 +2406,46 @@ else:
             "notes": "Notes",
         }
     )
+    if "Budget change" in df_whatif_display.columns:
+        df_whatif_display["Budget change"] = df_whatif_display["Budget change"].map(
+            lambda value: f"{value:.2f}x" if pd.notna(value) else "—"
+        )
+    for metric_col in ["Illustrative CPA", "Illustrative ROAS"]:
+        if metric_col in df_whatif_display.columns:
+            df_whatif_display[metric_col] = df_whatif_display[metric_col].map(
+                lambda value: f"{value:.2f}" if pd.notna(value) else "—"
+            )
     whatif_chart_col, whatif_table_col = st.columns([1.35, 1.0], gap="large")
     with whatif_chart_col:
-        chart_left, chart_right = st.columns(2)
-        fig_roas, fig_cpa = make_what_if_charts(df_whatif)
-        with chart_left:
-            st.plotly_chart(fig_roas, use_container_width=True)
-        with chart_right:
-            st.plotly_chart(fig_cpa, use_container_width=True)
+        with st.container(border=True):
+            st.markdown(
+                """
+                <div class="scenario-panel-title">Scenario paths</div>
+                <div class="scenario-panel-caption">Compare profitability and cost-efficiency trade-offs across stored budget-change assumptions.</div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.markdown('<div class="scenario-chart-stack"></div>', unsafe_allow_html=True)
+            chart_left, chart_right = st.columns(2, gap="medium")
+            fig_roas, fig_cpa = make_what_if_charts(df_whatif)
+            with chart_left:
+                st.plotly_chart(fig_roas, use_container_width=True, config={"displayModeBar": False})
+            with chart_right:
+                st.plotly_chart(fig_cpa, use_container_width=True, config={"displayModeBar": False})
     with whatif_table_col:
-        st.dataframe(df_whatif_display, use_container_width=True, hide_index=True)
+        with st.container(border=True):
+            st.markdown(
+                """
+                <div class="scenario-panel-title">Scenario reference</div>
+                <div class="scenario-panel-caption">Reference the stored assumptions and modeled outputs behind each scenario.</div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.dataframe(df_whatif_display, use_container_width=True, hide_index=True)
+            st.markdown(
+                '<div class="scenario-table-note">Use this table as supporting reference for the chart patterns, not as a forecast commitment.</div>',
+                unsafe_allow_html=True,
+            )
 
 analysis_sum = row.get("analysis_summary", pd.NA)
 ins = row.get("analysis_insights", [])
@@ -2386,6 +2489,7 @@ has_context = bool(
     or (isinstance(row.get("execution_metadata", {}), dict) and row.get("execution_metadata", {}))
 )
 if has_context or developer_mode:
+    st.markdown('<div class="scenario-transition"></div>', unsafe_allow_html=True)
     with st.expander("Reference details", expanded=False):
         st.caption("Technical appendix for deeper analytical backup and execution context.")
         if appendix_summary:
