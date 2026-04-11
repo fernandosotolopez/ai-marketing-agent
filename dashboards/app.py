@@ -1962,6 +1962,45 @@ st.markdown(
         margin-top: 0.62rem;
         margin-bottom: 1.05rem;
     }
+    .ledger-note {
+        font-size: 0.84rem;
+        line-height: 1.32;
+        opacity: 0.68;
+        margin-bottom: 0.7rem;
+        max-width: 42rem;
+    }
+    .run-details-note {
+        font-size: 0.82rem;
+        line-height: 1.3;
+        opacity: 0.66;
+        margin-bottom: 0.58rem;
+        max-width: 42rem;
+    }
+    .run-details-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.68rem 0.9rem;
+    }
+    .run-details-item {
+        border: 1px solid rgba(128, 128, 128, 0.1);
+        border-radius: 12px;
+        padding: 0.72rem 0.78rem;
+        background: rgba(250, 250, 250, 0.01);
+        min-width: 0;
+    }
+    .run-details-label {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        opacity: 0.58;
+        margin-bottom: 0.12rem;
+    }
+    .run-details-value {
+        font-size: 0.92rem;
+        line-height: 1.28;
+        font-weight: 500;
+        word-break: break-word;
+    }
     .appendix-card {
         border: 1px solid rgba(128, 128, 128, 0.12);
         border-radius: 12px;
@@ -2628,13 +2667,63 @@ with st.expander("Portfolio overview", expanded=False):
 
 with st.expander("Campaign table", expanded=False):
     df_all = build_campaign_display_df(df_f)
-    st.dataframe(df_all, use_container_width=True, hide_index=True)
+    if "Data notes" in df_all.columns:
+        notes_empty = (
+            df_all["Data notes"]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .eq("")
+            .all()
+        )
+        if notes_empty:
+            df_all = df_all.drop(columns=["Data notes"])
+    st.markdown(
+        '<div class="ledger-note">Use this ledger to compare campaigns quickly across review stance, priority, rationale, and supporting evidence.</div>',
+        unsafe_allow_html=True,
+    )
+    column_config = {
+        "Campaign": st.column_config.TextColumn("Campaign", width="small"),
+        "Recommended review": st.column_config.TextColumn("Recommended review", width="small"),
+        "Priority": st.column_config.TextColumn("Priority", width="small"),
+        "Why it matters": st.column_config.TextColumn("Why it matters", width="medium"),
+        "Key evidence": st.column_config.TextColumn("Key evidence", width="medium"),
+    }
+    if "Data notes" in df_all.columns:
+        column_config["Data notes"] = st.column_config.TextColumn("Data notes", width="medium")
+    st.dataframe(
+        df_all,
+        use_container_width=True,
+        hide_index=True,
+        column_config=column_config,
+    )
     st.download_button(
-        "⬇️ Download CSV (filtered)",
+        "Download filtered ledger",
         data=df_all.to_csv(index=False).encode("utf-8"),
         file_name="campaigns_filtered.csv",
         mime="text/csv",
     )
 
 with st.expander("Run details", expanded=False):
-    st.write(run_details_text or "No run details available.")
+    if run_details_text:
+        run_detail_items = []
+        for bit in str(run_details_text).split(" | "):
+            clean_bit = _clean_text(bit)
+            if not clean_bit:
+                continue
+            if "=" in clean_bit:
+                label, value = clean_bit.split("=", 1)
+                run_detail_items.append((label.replace("_", " ").strip().title(), value.strip()))
+            else:
+                run_detail_items.append(("Context", clean_bit))
+        st.markdown(
+            '<div class="run-details-note">Execution context for the current run, kept as secondary technical reference.</div>',
+            unsafe_allow_html=True,
+        )
+        run_details_html = "".join(
+            f"<div class='run-details-item'><div class='run-details-label'>{label}</div><div class='run-details-value'>{value}</div></div>"
+            for label, value in run_detail_items
+        )
+        st.markdown(f"<div class='run-details-grid'>{run_details_html}</div>", unsafe_allow_html=True)
+    else:
+        st.caption("No run details available.")
