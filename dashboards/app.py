@@ -132,6 +132,14 @@ def _clean_text(value: Any) -> str:
     return text
 
 
+def _clean_scenario_note(value: Any) -> str:
+    if isinstance(value, (list, tuple, set)):
+        parts = [_clean_text(item) for item in value]
+        parts = [part for part in parts if part and part.lower() not in {"nan", "none", "null"}]
+        return " | ".join(parts)
+    return _clean_text(value)
+
+
 def _string_list(value: Any) -> List[str]:
     if isinstance(value, list):
         return [_clean_text(item) for item in value if _clean_text(item)]
@@ -2001,6 +2009,74 @@ st.markdown(
         font-weight: 500;
         word-break: break-word;
     }
+    .appendix-list {
+        margin: 0.18rem 0 0 0;
+        padding-left: 1rem;
+    }
+    .appendix-list li {
+        margin-bottom: 0.38rem;
+        line-height: 1.34;
+    }
+    .appendix-list li:last-child {
+        margin-bottom: 0;
+    }
+    .appendix-bottom-space,
+    .run-details-bottom-space {
+        height: 0.7rem;
+    }
+    .main .block-container [data-testid="stExpander"] {
+        border-radius: 14px;
+        overflow: hidden;
+    }
+    .main .block-container [data-testid="stExpander"] details {
+        border: 1px solid rgba(128, 128, 128, 0.1);
+        border-radius: 14px;
+        background: rgba(250, 250, 250, 0.01);
+    }
+    .main .block-container [data-testid="stExpander"] summary {
+        padding-top: 0.04rem;
+        padding-bottom: 0.04rem;
+    }
+    .main .block-container [data-testid="stExpander"] summary p {
+        font-size: 0.94rem;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+    }
+    .main .block-container [data-testid="stExpanderDetails"] {
+        padding-top: 0.28rem;
+        padding-bottom: 0.18rem;
+    }
+    .main [data-testid="stHeaderActionElements"] {
+        display: none !important;
+    }
+    .main [data-testid="stHeadingActionElements"] {
+        display: none !important;
+    }
+    .main [data-testid="stHeadingWithActionElements"] {
+        gap: 0 !important;
+    }
+    .main [data-testid="stHeadingWithActionElements"] a {
+        display: none !important;
+    }
+    .main .stHeadingAnchor {
+        display: none !important;
+    }
+    .main button[aria-label*="heading"],
+    .main button[title*="heading"],
+    .main a[aria-label*="heading"] {
+        display: none !important;
+    }
+    .main .block-container [data-testid="stDataFrame"] {
+        border-radius: 12px;
+        overflow: hidden;
+    }
+    .stDownloadButton > button {
+        border-radius: 12px;
+        padding: 0.58rem 0.86rem;
+        border: 1px solid rgba(128, 128, 128, 0.16);
+        background: rgba(250, 250, 250, 0.015);
+        line-height: 1.2;
+    }
     .appendix-card {
         border: 1px solid rgba(128, 128, 128, 0.12);
         border-radius: 12px;
@@ -2028,13 +2104,13 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("📊 Marketing Decision Review")
+st.title("📊 Marketing Decision Review", anchor=False)
 st.caption(
     "Portfolio demo: a decision-support review surface that turns campaign diagnostics into prioritized business actions."
 )
 
 # Sidebar
-st.sidebar.header("Review controls")
+st.sidebar.header("Review controls", anchor=False)
 developer_mode = st.sidebar.toggle("Show technical details", value=False)
 
 if developer_mode:
@@ -2448,7 +2524,7 @@ action_options = _build_action_options(row, action_text)
 st.divider()
 has_support = bool(support_points or context_items)
 if has_support:
-    st.markdown("### Why this needs action")
+    st.subheader("Why this needs action", anchor=False)
     signals_html = "".join(f"<li>{reason}</li>" for reason in support_points[:4])
     metadata_html = "".join(
         f"<div class='metadata-item-refined'><div class='snapshot-label'>{label}</div><div class='snapshot-value'>{value}</div></div>"
@@ -2480,7 +2556,7 @@ if has_support:
 
 if action_options:
     st.divider()
-    st.markdown("### Actions to consider")
+    st.subheader("Actions to consider", anchor=False)
     action_html = "".join(f"<li>{option}</li>" for option in action_options[:4])
     st.markdown(
         f"""
@@ -2511,6 +2587,12 @@ else:
             "notes": "Notes",
         }
     )
+    if "Notes" in df_whatif_display.columns:
+        df_whatif_display["Notes"] = df_whatif_display["Notes"].map(_clean_scenario_note)
+        note_values = df_whatif_display["Notes"].str.lower()
+        notes_empty = note_values.isin({"", "nan", "none", "null", "n/a", "na", "-", "—"}).all()
+        if notes_empty:
+            df_whatif_display = df_whatif_display.drop(columns=["Notes"])
     if "Budget change" in df_whatif_display.columns:
         df_whatif_display["Budget change"] = df_whatif_display["Budget change"].map(
             lambda value: f"{value:.2f}x" if pd.notna(value) else "—"
@@ -2603,13 +2685,13 @@ if has_context or developer_mode:
 
         if appendix_insights:
             st.markdown("**Analyst notes**")
-            for it in appendix_insights[:5]:
-                st.write(f"- {it}")
+            insights_html = "".join(f"<li>{it}</li>" for it in appendix_insights[:5])
+            st.markdown(f"<ul class='appendix-list'>{insights_html}</ul>", unsafe_allow_html=True)
 
         if appendix_actions:
             st.markdown("**Additional actions considered**")
-            for it in appendix_actions[:5]:
-                st.write(f"- {it}")
+            appendix_actions_html = "".join(f"<li>{it}</li>" for it in appendix_actions[:5])
+            st.markdown(f"<ul class='appendix-list'>{appendix_actions_html}</ul>", unsafe_allow_html=True)
 
         provenance = row.get("provenance", {})
         execution_metadata = row.get("execution_metadata", {})
@@ -2622,6 +2704,7 @@ if has_context or developer_mode:
         if developer_mode:
             st.markdown("**Raw record**")
             st.code(json.dumps(row.to_dict(), indent=2, default=str), language="json")
+        st.markdown('<div class="appendix-bottom-space"></div>', unsafe_allow_html=True)
 
 with st.expander("Portfolio overview", expanded=False):
     portfolio_kpis_html = f"""
@@ -2698,7 +2781,7 @@ with st.expander("Campaign table", expanded=False):
         column_config=column_config,
     )
     st.download_button(
-        "Download filtered ledger",
+        "Download campaign table CSV",
         data=df_all.to_csv(index=False).encode("utf-8"),
         file_name="campaigns_filtered.csv",
         mime="text/csv",
@@ -2725,5 +2808,6 @@ with st.expander("Run details", expanded=False):
             for label, value in run_detail_items
         )
         st.markdown(f"<div class='run-details-grid'>{run_details_html}</div>", unsafe_allow_html=True)
+        st.markdown('<div class="run-details-bottom-space"></div>', unsafe_allow_html=True)
     else:
         st.caption("No run details available.")
