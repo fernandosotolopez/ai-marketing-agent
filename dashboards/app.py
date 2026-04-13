@@ -53,6 +53,8 @@ OPTIONAL_COLS = [
     "advisor_confidence",
     "advisor_used_llm",
     "advisor_model",
+    "advisor_source",
+    "advisor_fallback_reason",
     "analysis_insights",
     "analysis_suggested_actions",
     "analysis_summary",
@@ -846,6 +848,8 @@ def load_db_run_outputs(db_path: Path, run_id: str) -> pd.DataFrame:
                 "advisor_confidence": pd.NA,
                 "advisor_used_llm": pd.NA,
                 "advisor_model": pd.NA,
+                "advisor_source": pd.NA,
+                "advisor_fallback_reason": pd.NA,
             }
         actions = a.get("advisor_actions", [])
         if isinstance(actions, list):
@@ -863,6 +867,8 @@ def load_db_run_outputs(db_path: Path, run_id: str) -> pd.DataFrame:
             "advisor_confidence": a.get("advisor_confidence", pd.NA),
             "advisor_used_llm": a.get("advisor_used_llm", pd.NA),
             "advisor_model": a.get("advisor_model", pd.NA),
+            "advisor_source": a.get("advisor_source", pd.NA),
+            "advisor_fallback_reason": a.get("advisor_fallback_reason", pd.NA),
         }
 
     advisor_expanded = df["advisor_json"].apply(_advisor_fields).apply(pd.Series)
@@ -2346,6 +2352,13 @@ if pd.notna(advisor_used_llm) and str(advisor_used_llm).strip() and str(advisor_
 advisor_model = row.get("advisor_model", pd.NA)
 if pd.notna(advisor_model) and str(advisor_model).strip() and str(advisor_model).lower() != "nan":
     context_items.append(("Model", str(advisor_model)))
+advisor_source = row.get("advisor_source", pd.NA)
+if pd.notna(advisor_source) and str(advisor_source).strip() and str(advisor_source).lower() != "nan":
+    src = str(advisor_source).strip().lower()
+    if src == "llm":
+        context_items.append(("Advisor layer", "LLM narrative"))
+    elif src == "deterministic_fallback":
+        context_items.append(("Advisor layer", "Deterministic fallback"))
 
 rationale_summary = ""
 if pd.notna(advisor_summary) and str(advisor_summary).strip():
@@ -2502,6 +2515,13 @@ if pd.notna(advisor_used_llm) and str(advisor_used_llm).strip() and str(advisor_
 advisor_model = row.get("advisor_model", pd.NA)
 if pd.notna(advisor_model) and str(advisor_model).strip() and str(advisor_model).lower() != "nan":
     context_items.append(("Model", str(advisor_model)))
+advisor_source = row.get("advisor_source", pd.NA)
+if pd.notna(advisor_source) and str(advisor_source).strip() and str(advisor_source).lower() != "nan":
+    src = str(advisor_source).strip().lower()
+    if src == "llm":
+        context_items.append(("Advisor layer", "LLM narrative"))
+    elif src == "deterministic_fallback":
+        context_items.append(("Advisor layer", "Deterministic fallback"))
 rationale_summary = ""
 if pd.notna(advisor_summary) and str(advisor_summary).strip():
     rationale_summary = str(advisor_summary).strip()

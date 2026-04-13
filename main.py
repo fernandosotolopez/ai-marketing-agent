@@ -142,6 +142,16 @@ def parse_args() -> argparse.Namespace:
         help="1 = save memory.json, 0 = do not save (safe testing mode)",
     )
 
+    p.add_argument(
+        "--advisor-mode",
+        choices=["auto", "llm", "deterministic"],
+        default="auto",
+        help=(
+            "LLM advisor: auto = use LLM when API key is set, except for data/demo_campaigns.csv "
+            "(deterministic freeze file); llm = always attempt LLM; deterministic = never call LLM."
+        ),
+    )
+
     return p.parse_args()
 
 
@@ -186,8 +196,16 @@ def main() -> None:
         ]
         agent = MarketingAgent(goals=goals)
         loop = AgentLoop(agent=agent)
-        is_demo_freeze_run = csv_path.name == "demo_campaigns.csv"
-        advisor = LLMAdvisor(use_llm=not is_demo_freeze_run)
+        is_demo_freeze_file = csv_path.name == "demo_campaigns.csv"
+        if args.advisor_mode == "deterministic":
+            advisor_use_llm = False
+        elif args.advisor_mode == "llm":
+            advisor_use_llm = True
+        else:
+            # auto: deterministic advisor for the curated demo CSV; LLM elsewhere when key exists
+            advisor_use_llm = not is_demo_freeze_file
+
+        advisor = LLMAdvisor(use_llm=advisor_use_llm)
 
         # 3) Run through campaigns
         if args.max_rows and args.max_rows > 0:
@@ -216,7 +234,8 @@ def main() -> None:
             "input_memory_path": str(memory_path),
             "save_memory_requested": int(args.save_memory),
             "advisor_configured_model": getattr(advisor, "model", None),
-            "demo_freeze_mode": is_demo_freeze_run,
+            "advisor_mode_cli": args.advisor_mode,
+            "demo_freeze_csv": is_demo_freeze_file,
         }
 
         # Create a run record once per execution
@@ -231,6 +250,11 @@ def main() -> None:
             run_metadata=initial_run_metadata,
         )
         print(f"[DB] run_id={run_id} (saving outputs to data/agent_runs.db)\n")
+        print(
+            f"[Advisor] mode={args.advisor_mode} "
+            f"use_llm={advisor_use_llm} "
+            f"model={getattr(advisor, 'model', None)}\n"
+        )
 
         persisted_rows = 0
         skipped_validation_rows = []
@@ -284,7 +308,12 @@ def main() -> None:
 
             # 3e.1) Advisor block (future LLM)
             advice = advisor.advise(state=enriched, decision=decision)
-            print(f"(advisor_used_llm={advice.get('advisor_used_llm')}, model={advice.get('advisor_model')})")
+            print(
+                f"(advisor_source={advice.get('advisor_source')}, "
+                f"advisor_used_llm={advice.get('advisor_used_llm')}, "
+                f"model={advice.get('advisor_model')}, "
+                f"fallback_reason={advice.get('advisor_fallback_reason')})"
+            )
             print("ADVISOR (future LLM)")
             print("-" * 72)
             print(advice["advisor_summary"])
@@ -316,8 +345,18 @@ def main() -> None:
             execution_metadata = {
                 "row_index": i + 1,
                 "metrics_warning_count": len(metrics_result.warnings),
-                "advisor_used_llm": advisor_json.get("advisor_used_llm") if isinstance(advisor_json, dict) else None,
-                "advisor_model": advisor_json.get("advisor_model") if isinstance(advisor_json, dict) else None,
+                "advisor_used_llm": advisor_json.get("advisor_used_llm")
+                if isinstance(advisor_json, dict)
+                else None,
+                "advisor_model": advisor_json.get("advisor_model")
+                if isinstance(advisor_json, dict)
+                else None,
+                "advisor_source": advisor_json.get("advisor_source")
+                if isinstance(advisor_json, dict)
+                else None,
+                "advisor_fallback_reason": advisor_json.get("advisor_fallback_reason")
+                if isinstance(advisor_json, dict)
+                else None,
             }
 
             # Save to SQLite (run history)
