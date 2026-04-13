@@ -132,6 +132,41 @@ def _clean_text(value: Any) -> str:
     return text
 
 
+def _contains_technical_error_text(value: Any) -> bool:
+    text = _clean_text(value).lower()
+    if not text:
+        return False
+    markers = [
+        "apiconnectionerror",
+        "llm error",
+        "connection error",
+        "connection failure",
+        "openai_api_key",
+        "traceback",
+        "timeout",
+        "rate limit",
+        "authentication error",
+    ]
+    return any(marker in text for marker in markers)
+
+
+def _clean_business_summary(value: Any) -> str:
+    text = _clean_text(value)
+    if not text or _contains_technical_error_text(text):
+        return ""
+    return text
+
+
+def _normalize_scenario_note(value: Any) -> str:
+    if isinstance(value, list):
+        clean_items = [_clean_text(item) for item in value if _clean_text(item)]
+        return " | ".join(clean_items)
+    text = _clean_text(value)
+    if text.lower() in {"none", "null", "[]"}:
+        return ""
+    return text
+
+
 def _clean_scenario_note(value: Any) -> str:
     if isinstance(value, (list, tuple, set)):
         parts = [_clean_text(item) for item in value]
@@ -814,11 +849,16 @@ def load_db_run_outputs(db_path: Path, run_id: str) -> pd.DataFrame:
             }
         actions = a.get("advisor_actions", [])
         if isinstance(actions, list):
-            actions = [str(x).strip() for x in actions if str(x).strip()]
+            actions = [
+                str(x).strip()
+                for x in actions
+                if str(x).strip() and not _contains_technical_error_text(x)
+            ]
         else:
             actions = []
+        summary = _clean_business_summary(a.get("advisor_summary", pd.NA))
         return {
-            "advisor_summary": a.get("advisor_summary", pd.NA),
+            "advisor_summary": summary if summary else pd.NA,
             "advisor_actions": actions,
             "advisor_confidence": a.get("advisor_confidence", pd.NA),
             "advisor_used_llm": a.get("advisor_used_llm", pd.NA),
@@ -972,6 +1012,7 @@ def scenarios_to_df(scenarios: List[Dict[str, Any]]) -> pd.DataFrame:
         df["scenario_name"] = pd.NA
     if "notes" not in df.columns:
         df["notes"] = ""
+    df["notes"] = df["notes"].apply(_normalize_scenario_note)
 
     df = df[["scenario_name", "budget_multiplier", "projected_CPA", "projected_ROAS", "notes"]]
     df = df.sort_values("budget_multiplier", ascending=True)
@@ -2672,13 +2713,14 @@ has_context = bool(
     appendix_summary
     or appendix_insights
     or appendix_actions
-    or (isinstance(row.get("provenance", {}), dict) and row.get("provenance", {}))
-    or (isinstance(row.get("execution_metadata", {}), dict) and row.get("execution_metadata", {}))
 )
 if has_context or developer_mode:
     st.markdown('<div class="scenario-transition"></div>', unsafe_allow_html=True)
     with st.expander("Reference details", expanded=False):
-        st.markdown('<div class="appendix-note">Technical appendix for deeper analytical backup and execution context.</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="appendix-note">Concise analytical appendix for stored analysis and analyst notes.</div>',
+            unsafe_allow_html=True,
+        )
         if appendix_summary:
             st.markdown("**Stored analysis note**")
             st.markdown(f"<div class='appendix-card'>{appendix_summary}</div>", unsafe_allow_html=True)
@@ -2693,14 +2735,6 @@ if has_context or developer_mode:
             appendix_actions_html = "".join(f"<li>{it}</li>" for it in appendix_actions[:5])
             st.markdown(f"<ul class='appendix-list'>{appendix_actions_html}</ul>", unsafe_allow_html=True)
 
-        provenance = row.get("provenance", {})
-        execution_metadata = row.get("execution_metadata", {})
-        if isinstance(provenance, dict) and provenance:
-            st.markdown("**Data provenance**")
-            st.json(provenance)
-        if isinstance(execution_metadata, dict) and execution_metadata:
-            st.markdown("**Execution details**")
-            st.json(execution_metadata)
         if developer_mode:
             st.markdown("**Raw record**")
             st.code(json.dumps(row.to_dict(), indent=2, default=str), language="json")
