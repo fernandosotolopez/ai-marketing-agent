@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+import random
 import time
 from typing import Any, Dict, List, Optional, Literal
 
@@ -24,12 +26,15 @@ class LLMAdvisor:
       - OPENAI_API_KEY
       - OPENAI_MODEL (optional) default: gpt-4.1-mini
       - OPENAI_ADVISOR_TIMEOUT (optional) seconds, default 90
+      - OPENAI_ADVISOR_MAX_ATTEMPTS (optional) default 6
+      - OPENAI_ADVISOR_MIN_INTERVAL (optional) min seconds between API calls, default 0.25
     """
 
     def __init__(self, model: Optional[str] = None, use_llm: bool = True) -> None:
         self.model = model or os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
         self.use_llm = use_llm
         self._timeout = float(os.getenv("OPENAI_ADVISOR_TIMEOUT", "90"))
+        self._max_attempts = max(1, int(os.getenv("OPENAI_ADVISOR_MAX_ATTEMPTS", "6")))
 
     def advise(self, state: Dict[str, Any], decision: Dict[str, Any]) -> Dict[str, Any]:
         if not self.use_llm:
@@ -47,15 +52,28 @@ class LLMAdvisor:
             )
 
         slim_state = _slim_state_for_llm(state)
+        slim_decision = _slim_decision_for_llm(decision)
 
-        for attempt in range(2):
+        from openai import (
+            APIConnectionError,
+            APIStatusError,
+            APITimeoutError,
+            AuthenticationError,
+            BadRequestError,
+            OpenAI,
+            RateLimitError,
+        )
+
+        # One client per advise(); httpx max_retries handles low-level connection blips.
+        client = OpenAI(timeout=self._timeout, max_retries=2)
+
+        last_failure_reason = "api_failure"
+
+        for attempt in range(self._max_attempts):
             try:
-                from openai import OpenAI
-
-                client = OpenAI(timeout=self._timeout, max_retries=1)
-
+                _advisor_request_throttle()
                 system_msg, user_msg = self._build_messages(
-                    state=slim_state, decision=decision
+                    state=slim_state, decision=slim_decision
                 )
 
                 resp = client.responses.parse(
@@ -69,14 +87,9 @@ class LLMAdvisor:
 
                 parsed: Optional[AdvisorOutput] = getattr(resp, "output_parsed", None)
                 if parsed is None:
-                    if attempt == 0:
-                        time.sleep(0.5)
-                        continue
-                    return self._fallback(
-                        state=state,
-                        decision=decision,
-                        reason="empty_parse",
-                    )
+                    last_failure_reason = "empty_parse"
+                    _sleep_transient_backoff(attempt, base=0.75, cap=12.0)
+                    continue
 
                 out = {
                     "advisor_summary": (parsed.advisor_summary or "").strip(),
@@ -99,15 +112,73 @@ class LLMAdvisor:
                     state=state, decision=decision, out=out
                 )
 
-            except Exception:
-                if attempt == 0:
-                    time.sleep(0.8)
+            except RateLimitError as e:
+                last_failure_reason = "rate_limited"
+                _sleep_for_rate_limit(e, attempt)
+                continue
+
+            except APITimeoutError:
+                last_failure_reason = "timeout"
+                _sleep_transient_backoff(attempt, base=1.0, cap=20.0)
+                continue
+
+            except APIConnectionError:
+                last_failure_reason = "connection_error"
+                _sleep_transient_backoff(attempt, base=0.6, cap=15.0)
+                continue
+
+            except APIStatusError as e:
+                code = getattr(e, "status_code", None)
+                if code in (408, 429, 500, 502, 503, 504):
+                    last_failure_reason = (
+                        "rate_limited" if code == 429 else "server_error"
+                    )
+                    _sleep_for_status_code(code, attempt, e)
                     continue
+                if code in (401, 403):
+                    return self._fallback(
+                        state=state,
+                        decision=decision,
+                        reason="auth_error",
+                    )
+                if code == 400:
+                    return self._fallback(
+                        state=state,
+                        decision=decision,
+                        reason="bad_request",
+                    )
                 return self._fallback(
                     state=state,
                     decision=decision,
                     reason="api_failure",
                 )
+
+            except AuthenticationError:
+                return self._fallback(
+                    state=state,
+                    decision=decision,
+                    reason="auth_error",
+                )
+
+            except BadRequestError:
+                return self._fallback(
+                    state=state,
+                    decision=decision,
+                    reason="bad_request",
+                )
+
+            except KeyboardInterrupt:
+                raise
+            except Exception:
+                last_failure_reason = "api_failure"
+                _sleep_transient_backoff(attempt, base=0.5, cap=8.0)
+                continue
+
+        return self._fallback(
+            state=state,
+            decision=decision,
+            reason=last_failure_reason,
+        )
 
     def _build_messages(
         self, state: Dict[str, Any], decision: Dict[str, Any]
@@ -121,18 +192,22 @@ class LLMAdvisor:
             "Never mention APIs, models, errors, stack traces, or system internals."
         )
 
+        state_json = json.dumps(state, ensure_ascii=False, default=str, separators=(",", ":"))
+        decision_json = json.dumps(
+            decision, ensure_ascii=False, default=str, separators=(",", ":")
+        )
         user_msg = (
-            "Given the campaign STATE (metrics only) and the rule-based DECISION, output:\n"
+            "Given STATE_JSON (metrics) and DECISION_JSON (stance, severity, reasons), output:\n"
             "- advisor_summary: 1-2 sentences\n"
             "- advisor_actions: 3-6 short imperative steps (each under 200 characters)\n"
             "- advisor_confidence: low|medium|high\n\n"
             "Constraints:\n"
-            "- If stance is 'observe', avoid aggressive actions (no full pause unless ROAS is far below 1.0 and the decision already implies risk).\n"
+            "- If stance is 'observe', avoid aggressive actions.\n"
             "- If stance is 'recommend', prefer measured optimizations, not escalation language.\n"
             "- If stance is 'escalate', be direct about owner review and risk control.\n"
-            "- If ROAS < 1.0, include at least one risk-control or spend-discipline action.\n\n"
-            f"STATE: {state}\n"
-            f"DECISION: {decision}\n"
+            "- If ROAS < 1.0 in STATE_JSON, include at least one risk-control or spend-discipline action.\n\n"
+            f"STATE_JSON:\n{state_json}\n\n"
+            f"DECISION_JSON:\n{decision_json}\n"
         )
         return system_msg, user_msg
 
@@ -256,6 +331,82 @@ def _slim_state_for_llm(state: Dict[str, Any]) -> Dict[str, Any]:
         "days_active",
     )
     return {k: state.get(k) for k in keys}
+
+
+# Serialize OpenAI calls slightly across a batch run (reduces 429 bursts on low-RPM keys).
+_LAST_ADVISOR_CALL_MONO: float = 0.0
+_DECISION_REASON_MAX_LEN = 320
+
+
+def _advisor_request_throttle() -> None:
+    global _LAST_ADVISOR_CALL_MONO
+    min_interval = float(os.getenv("OPENAI_ADVISOR_MIN_INTERVAL", "0.25"))
+    if min_interval <= 0:
+        return
+    now = time.monotonic()
+    gap = min_interval - (now - _LAST_ADVISOR_CALL_MONO)
+    if gap > 0:
+        time.sleep(gap)
+    _LAST_ADVISOR_CALL_MONO = time.monotonic()
+
+
+def _slim_decision_for_llm(decision: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Decision dicts can include very long reason strings (e.g. trend boilerplate).
+    That inflates tokens, latency, and timeout risk versus slimmer rows — same run, uneven failures.
+    """
+    reasons = decision.get("reasons", [])
+    slim_reasons: List[str] = []
+    if isinstance(reasons, list):
+        for item in reasons[:8]:
+            text = _clean_text(item)
+            if not text:
+                continue
+            if len(text) > _DECISION_REASON_MAX_LEN:
+                text = text[: _DECISION_REASON_MAX_LEN - 1].rstrip() + "…"
+            slim_reasons.append(text)
+    return {
+        "stance": decision.get("stance"),
+        "severity": decision.get("severity"),
+        "reasons": slim_reasons,
+    }
+
+
+def _sleep_transient_backoff(attempt: int, *, base: float, cap: float) -> None:
+    exp = min(cap, base * (2**attempt))
+    jitter = random.uniform(0, min(1.0, max(0.05, exp * 0.12)))
+    time.sleep(min(cap, exp + jitter))
+
+
+def _retry_after_seconds(exc: BaseException) -> Optional[float]:
+    resp = getattr(exc, "response", None)
+    if resp is None:
+        return None
+    headers = getattr(resp, "headers", None)
+    if not headers:
+        return None
+    raw = headers.get("retry-after") or headers.get("Retry-After")
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _sleep_for_rate_limit(exc: BaseException, attempt: int) -> None:
+    ra = _retry_after_seconds(exc)
+    if ra is not None and ra > 0:
+        time.sleep(min(90.0, ra + random.uniform(0, 0.35)))
+        return
+    _sleep_transient_backoff(attempt, base=2.0, cap=45.0)
+
+
+def _sleep_for_status_code(code: Optional[int], attempt: int, exc: BaseException) -> None:
+    if code == 429:
+        _sleep_for_rate_limit(exc, attempt)
+    else:
+        _sleep_transient_backoff(attempt, base=1.0, cap=20.0)
 
 
 def _normalize_confidence(value: Any) -> str:
