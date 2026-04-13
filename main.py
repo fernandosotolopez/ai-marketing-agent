@@ -81,16 +81,28 @@ def to_jsonable(obj: Any) -> Any:
 def scenarios_to_jsonable(scenarios: Any) -> Any:
     out = []
     for s in scenarios or []:
+        normalized_notes = _normalize_scenario_notes(getattr(s, "notes", None))
         out.append(
             {
                 "scenario_name": getattr(s, "scenario_name", None),
                 "budget_multiplier": getattr(s, "budget_multiplier", None),
                 "projected_CPA": getattr(s, "projected_CPA", None),
                 "projected_ROAS": getattr(s, "projected_ROAS", None),
-                "notes": getattr(s, "notes", None),
+                "notes": normalized_notes,
             }
         )
     return out
+
+
+def _normalize_scenario_notes(value: Any) -> Any:
+    if isinstance(value, list):
+        clean_notes = [str(item).strip() for item in value if str(item).strip()]
+        return " | ".join(clean_notes) if clean_notes else None
+
+    text = str(value).strip() if value is not None else ""
+    if not text or text.lower() in {"none", "null", "nan", "[]"}:
+        return None
+    return text
 
 
 def _append_unique_text(items: list[str], value: Any) -> None:
@@ -174,7 +186,8 @@ def main() -> None:
         ]
         agent = MarketingAgent(goals=goals)
         loop = AgentLoop(agent=agent)
-        advisor = LLMAdvisor()
+        is_demo_freeze_run = csv_path.name == "demo_campaigns.csv"
+        advisor = LLMAdvisor(use_llm=not is_demo_freeze_run)
 
         # 3) Run through campaigns
         if args.max_rows and args.max_rows > 0:
@@ -203,6 +216,7 @@ def main() -> None:
             "input_memory_path": str(memory_path),
             "save_memory_requested": int(args.save_memory),
             "advisor_configured_model": getattr(advisor, "model", None),
+            "demo_freeze_mode": is_demo_freeze_run,
         }
 
         # Create a run record once per execution
