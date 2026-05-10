@@ -1,4 +1,4 @@
-# AI Marketing Agent
+# AI Marketing Analytics Decision-Support Agent
 
 AI-assisted marketing analytics agent for campaign evaluation, decision support, scenario simulation, and dashboard-based analysis.
 
@@ -43,3 +43,23 @@ tools/
 main.py
 requirements.txt
 README.md
+```
+
+## Why This Project Matters
+
+Marketing teams often need to decide which campaigns require attention, which ones should keep running, and where budget adjustments may be needed.
+
+This project shows how analytics, business rules, scenario simulation, and LLM-assisted recommendations can work together to turn campaign data into clearer decision support.
+
+## Portfolio Focus
+
+This project demonstrates skills in:
+
+- Marketing analytics
+- Campaign performance analysis
+- AI-assisted decision support
+- Scenario simulation
+- Dashboard development
+- Python-based analytics workflows
+- SQLite persistence
+- Structured recommendation logic
